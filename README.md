@@ -302,3 +302,7 @@ wget -O /etc/config/padkap \
 
 - **Issues**: [github.com/spgsroot/padkap-evolution/issues](https://github.com/spgsroot/padkap-evolution/issues)
 - **TG-чат**: [t.me/itdogchat](https://t.me/itdogchat/81758/420321)
+
+---
+https://github.com/itdoginfo/podkop/blob/main/TRADEMARK.md
+Based on Podkop open-source software
