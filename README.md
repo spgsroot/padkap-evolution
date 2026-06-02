@@ -2,19 +2,24 @@
 
 # NetShift
 
-[![Release](https://img.shields.io/github/v/release/yandexru45/podkop-evolution?style=flat-square)](https://github.com/yandexru45/podkop-evolution/releases)
-[![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue?style=flat-square)](LICENSE)
-[![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%2B-orange?style=flat-square)](https://openwrt.org/)
-
+<p align="center">
+  <img src="./docs/icon.png" alt="Clash" width="128" />
+  <br>
+  <br>
+  <a href="https://github.com/yandexru45/netshift/releases">
+    <img src="https://img.shields.io/github/release/yandexru45/netshift/all.svg">
+  </a>
+</p>
+<h3 align="center"><a href="https://github.com/sagernet/sing-box">Sing-box</a> client for Openwrt</h3>
 </div>
 
 ---
+<p align="center">
 
-<div align="center">
+[![Static Badge](https://img.shields.io/badge/Telegram-Channel-Link?style=for-the-badge&logo=Telegram&logoColor=white&logoSize=auto&color=blue)](https://t.me/netshift_news)
 
-<img src="docs/screenshot.png" alt="NetShift в LuCI" width="800" />
-
-</div>
+[![Static Badge](https://img.shields.io/badge/Telegram-Chat-yes?style=for-the-badge&logo=Telegram&logoColor=white&logoSize=auto&color=blue)](https://t.me/netshift_chat)
+</p>
 
 ---
 
@@ -34,6 +39,17 @@
 - [x] **Переключаемое ядро sing-box** - стабильное ↔ sing-box-extended прямо из веб-интерфейса<br><sub>клиентский транспорт xhttp · установка и откат в один клик</sub>
 - [x] **Веб-интерфейс LuCI** - дашборд, диагностика и настройки без ручной правки конфигов<br><sub>статус серверов · проверка соединения · логи</sub>
 - [x] **Автоматическая миграция** - обновление со старого podkop переносит конфиг без перенастройки
+
+
+---
+
+<div align="center">
+
+<img src="docs/screenshot.png" alt="NetShift в LuCI" width="800" />
+
+</div>
+
+---
 
 ## Вещи, которые необходимо знать перед установкой
 
@@ -81,7 +97,7 @@
 
 ```sh
 mv /etc/config/netshift /etc/config/netshift-070
-wget -O /etc/config/netshift https://raw.githubusercontent.com/yandexru45/podkop-evolution/refs/heads/main/netshift/files/etc/config/netshift
+wget -O /etc/config/netshift https://raw.githubusercontent.com/yandexru45/netshift/refs/heads/main/netshift/files/etc/config/netshift
 # затем настроить заново через LuCI или UCI
 ```
 
@@ -196,11 +212,11 @@ docker build -f Dockerfile-apk --build-arg NETSHIFT_VERSION=0.8.0 -t netshift:ap
 
 ## Star History
 
-<a href="https://www.star-history.com/#yandexru45/podkop-evolution&Date">
+<a href="https://www.star-history.com/#yandexru45/netshift&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=yandexru45/podkop-evolution&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=yandexru45/podkop-evolution&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=yandexru45/podkop-evolution&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=yandexru45/netshift&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=yandexru45/netshift&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=yandexru45/netshift&type=Date" />
  </picture>
 </a>
 

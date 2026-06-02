@@ -1,7 +1,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: 💬 Если у вас что-то не работает, прежде всего прочитайте README проекта
-    url: https://github.com/yandexru45/podkop-evolution
+    url: https://github.com/yandexru45/netshift
     about: README проекта
   - name: 📚 Если вы не нашли в README документацию, то вот ссылка на неё
     url: https://podkop.net

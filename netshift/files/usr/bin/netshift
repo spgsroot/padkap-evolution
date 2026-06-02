@@ -2581,7 +2581,7 @@ get_service_listen_address() {
     network_get_ipaddr service_listen_address "$interface"
 
     if [ -z "$service_listen_address" ]; then
-        log "Failed to determine the listening IP address. Please open an issue to report this problem: https://github.com/yandexru45/podkop-evolution/issues" "error"
+        log "Failed to determine the listening IP address. Please open an issue to report this problem: https://github.com/yandexru45/netshift/issues" "error"
         return 1
     fi
 
@@ -2854,7 +2854,7 @@ get_system_info() {
 
     netshift_version="$NETSHIFT_VERSION"
 
-    netshift_latest_version=$(curl -m 3 -s https://api.github.com/repos/yandexru45/podkop-evolution/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
+    netshift_latest_version=$(curl -m 3 -s https://api.github.com/repos/yandexru45/netshift/releases/latest | grep '"tag_name":' | cut -d'"' -f4)
     [ -z "$netshift_latest_version" ] && netshift_latest_version="unknown"
 
     if [ -f /www/luci-static/resources/view/netshift/main.js ]; then
