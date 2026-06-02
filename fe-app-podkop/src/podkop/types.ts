@@ -218,6 +218,7 @@ export namespace Podkop {
     sing_box_version: string;
     openwrt_version: string;
     device_model: string;
+    sing_box_extended: 0 | 1;
   }
 
   export interface GetClashApiProxyLatency {

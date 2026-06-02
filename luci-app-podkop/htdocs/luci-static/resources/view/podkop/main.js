@@ -698,7 +698,35 @@ var PodkopShellMethods = {
   getSystemInfo: async () => callBaseMethod(
     Podkop.AvailableMethods.GET_SYSTEM_INFO
   ),
-  subscriptionUpdate: async () => callBaseMethod(Podkop.AvailableMethods.SUBSCRIPTION_UPDATE)
+  subscriptionUpdate: async () => callBaseMethod(Podkop.AvailableMethods.SUBSCRIPTION_UPDATE),
+  singBoxComponentAction: async (action) => {
+    const response = await executeShellCommand({
+      command: "/usr/bin/podkop",
+      args: ["component_action", "sing_box", action],
+      timeout: 6e5
+    });
+    if (response.stdout) {
+      try {
+        const parsed = JSON.parse(
+          response.stdout
+        );
+        return {
+          success: Boolean(parsed.success),
+          version: parsed.version,
+          message: parsed.message
+        };
+      } catch (_e) {
+        return {
+          success: false,
+          message: response.stdout
+        };
+      }
+    }
+    return {
+      success: false,
+      message: response.stderr || ""
+    };
+  }
 };
 
 // src/podkop/methods/custom/getDashboardSections.ts
@@ -1223,7 +1251,8 @@ var initialDiagnosticStore = {
     luci_app_version: "loading",
     sing_box_version: "loading",
     openwrt_version: "loading",
-    device_model: "loading"
+    device_model: "loading",
+    sing_box_extended: 0
   },
   diagnosticsActions: {
     restart: {
@@ -1248,6 +1277,9 @@ var initialDiagnosticStore = {
       loading: false
     },
     showSingBoxConfig: {
+      loading: false
+    },
+    singBoxInstall: {
       loading: false
     }
   },
@@ -3574,7 +3606,9 @@ function renderAvailableActions({
   disable,
   globalCheck,
   viewLogs,
-  showSingBoxConfig
+  showSingBoxConfig,
+  singBoxInstall,
+  singBoxExtended
 }) {
   return E("div", { class: "pdk_diagnostic-page__right-bar__actions" }, [
     E("b", {}, _("Available actions")),
@@ -3653,6 +3687,15 @@ function renderAvailableActions({
         text: _("Show sing-box config"),
         loading: showSingBoxConfig.loading,
         disabled: showSingBoxConfig.disabled
+      })
+    ]),
+    ...insertIf(singBoxInstall.visible, [
+      renderButton({
+        onClick: singBoxInstall.onClick,
+        icon: renderRotateCcwIcon24,
+        text: singBoxExtended ? _("Install stable") : _("Install extended"),
+        loading: singBoxInstall.loading,
+        disabled: singBoxInstall.disabled
       })
     ])
   ]);
@@ -4054,7 +4097,8 @@ async function fetchSystemInfo() {
     store.set({
       diagnosticsSystemInfo: {
         loading: false,
-        ...systemInfo.data
+        ...systemInfo.data,
+        sing_box_extended: systemInfo.data.sing_box_extended === 1 ? 1 : 0
       }
     });
   } else {
@@ -4066,7 +4110,8 @@ async function fetchSystemInfo() {
         luci_app_version: _("unknown"),
         sing_box_version: _("unknown"),
         openwrt_version: _("unknown"),
-        device_model: _("unknown")
+        device_model: _("unknown"),
+        sing_box_extended: 0
       }
     });
   }
@@ -4311,6 +4356,41 @@ async function handleShowSingBoxConfig() {
     });
   }
 }
+async function handleInstallSingBox() {
+  const diagnosticsActions = store.get().diagnosticsActions;
+  store.set({
+    diagnosticsActions: {
+      ...diagnosticsActions,
+      singBoxInstall: { loading: true }
+    }
+  });
+  const isExtended = store.get().diagnosticsSystemInfo.sing_box_extended === 1;
+  try {
+    const result = await PodkopShellMethods.singBoxComponentAction(
+      isExtended ? "install_stable" : "install_extended"
+    );
+    if (result.success) {
+      showToast(
+        _("Sing-box core changed, version: ") + (result.version || ""),
+        "success"
+      );
+    } else {
+      logger.error("[DIAGNOSTIC]", "handleInstallSingBox - e", result);
+      showToast(result.message || _("Failed to execute!"), "error");
+    }
+  } catch (e) {
+    logger.error("[DIAGNOSTIC]", "handleInstallSingBox - e", e);
+    showToast(_("Failed to execute!"), "error");
+  } finally {
+    store.set({
+      diagnosticsActions: {
+        ...diagnosticsActions,
+        singBoxInstall: { loading: false }
+      }
+    });
+    await fetchSystemInfo();
+  }
+}
 function renderWikiDisclaimerWidget() {
   const diagnosticsChecks = store.get().diagnosticsChecks;
   function getWikiKind() {
@@ -4384,7 +4464,14 @@ function renderDiagnosticAvailableActionsWidget() {
       visible: true,
       onClick: handleShowSingBoxConfig,
       disabled: atLeastOneServiceCommandLoading
-    }
+    },
+    singBoxInstall: {
+      loading: diagnosticsActions.singBoxInstall.loading,
+      visible: true,
+      onClick: handleInstallSingBox,
+      disabled: atLeastOneServiceCommandLoading || diagnosticsActions.singBoxInstall.loading
+    },
+    singBoxExtended: store.get().diagnosticsSystemInfo.sing_box_extended
   });
   return preserveScrollForPage(() => {
     container.replaceChildren(renderedActions);
@@ -4427,7 +4514,7 @@ async function onStoreUpdate2(next, prev, diff) {
   if (diff.diagnosticsRunAction) {
     renderDiagnosticRunActionWidget();
   }
-  if (diff.diagnosticsActions || diff.servicesInfoWidget) {
+  if (diff.diagnosticsActions || diff.servicesInfoWidget || diff.diagnosticsSystemInfo) {
     renderDiagnosticAvailableActionsWidget();
   }
   if (diff.diagnosticsSystemInfo) {

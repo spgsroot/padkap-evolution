@@ -20,6 +20,7 @@ check_required_file "$PODKOP_LIB/sing_box_config_manager.sh"
 check_required_file "$PODKOP_LIB/sing_box_config_facade.sh"
 check_required_file "$PODKOP_LIB/logging.sh"
 check_required_file "$PODKOP_LIB/rulesets.sh"
+check_required_file "$PODKOP_LIB/updater.sh"
 . /lib/functions.sh
 . /lib/config/uci.sh
 . /lib/functions/network.sh
@@ -30,6 +31,7 @@ check_required_file "$PODKOP_LIB/rulesets.sh"
 . "$PODKOP_LIB/sing_box_config_facade.sh"
 . "$PODKOP_LIB/logging.sh"
 . "$PODKOP_LIB/rulesets.sh"
+. "$PODKOP_LIB/updater.sh"
 
 config_load "$PODKOP_CONFIG"
 
@@ -2840,7 +2842,7 @@ show_system_info() {
 }
 
 get_system_info() {
-    local podkop_version podkop_latest_version luci_app_version sing_box_version openwrt_version device_model
+    local podkop_version podkop_latest_version luci_app_version sing_box_version openwrt_version device_model sing_box_extended
 
     podkop_version="$PODKOP_VERSION"
 
@@ -2860,6 +2862,11 @@ get_system_info() {
         sing_box_version="not installed"
     fi
 
+    sing_box_extended=0
+    if command -v sing-box > /dev/null 2>&1 && is_sing_box_extended "$sing_box_version"; then
+        sing_box_extended=1
+    fi
+
     if [ -f /etc/os-release ]; then
         openwrt_version=$(grep OPENWRT_RELEASE /etc/os-release | cut -d'"' -f2)
         [ -z "$openwrt_version" ] && openwrt_version="unknown"
@@ -2874,7 +2881,7 @@ get_system_info() {
         device_model="unknown"
     fi
 
-    echo "{\"podkop_version\": \"$podkop_version\", \"podkop_latest_version\": \"$podkop_latest_version\", \"luci_app_version\": \"$luci_app_version\", \"sing_box_version\": \"$sing_box_version\", \"openwrt_version\": \"$openwrt_version\", \"device_model\": \"$device_model\"}" | jq .
+    echo "{\"podkop_version\": \"$podkop_version\", \"podkop_latest_version\": \"$podkop_latest_version\", \"luci_app_version\": \"$luci_app_version\", \"sing_box_version\": \"$sing_box_version\", \"sing_box_extended\": $sing_box_extended, \"openwrt_version\": \"$openwrt_version\", \"device_model\": \"$device_model\"}" | jq .
 }
 
 get_sing_box_status() {
@@ -3333,7 +3340,7 @@ global_check() {
     system_info_json=$(get_system_info)
 
     if [ -n "$system_info_json" ]; then
-        local podkop_version podkop_latest_version luci_app_version sing_box_version openwrt_version device_model
+    local podkop_version podkop_latest_version luci_app_version sing_box_version openwrt_version device_model sing_box_extended
 
         podkop_version=$(echo "$system_info_json" | jq -r '.podkop_version // "unknown"')
         podkop_latest_version=$(echo "$system_info_json" | jq -r '.podkop_latest_version // "unknown"')
@@ -3669,6 +3676,9 @@ Available commands:
     get_system_info         Get system information in JSON format
     check_dns_available     Check DNS server availability
     global_check            Run global system check
+    component_action        Run component action: <component> <action>
+                            (e.g. sing_box install_extended|install_stable|check_update)
+    component_action_async  Run component_action in background, returns job file path
 EOF
 }
 
@@ -3747,6 +3757,13 @@ check_dns_available)
     ;;
 global_check)
     global_check "${2:-}"
+    ;;
+component_action)
+    component_action "$2" "$3"
+    ;;
+component_action_async)
+    "$0" component_action "$2" "$3" > "/tmp/podkop-component-$$.json" 2>&1 &
+    echo "{\"success\":true,\"job\":\"/tmp/podkop-component-$$.json\"}"
     ;;
 *)
     show_help

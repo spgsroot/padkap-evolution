@@ -1,15 +1,15 @@
 # RU translations for PODKOP package.
 # Copyright (C) 2026 THE PODKOP'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the PODKOP package.
-# divocatt, 2026.
+# yandexru45, 2026.
 #
 msgid ""
 msgstr ""
 "Project-Id-Version: PODKOP\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-05-29 16:40+0300\n"
-"PO-Revision-Date: 2026-05-29 16:40+0300\n"
-"Last-Translator: divocatt\n"
+"POT-Creation-Date: 2026-06-02 14:25+0300\n"
+"PO-Revision-Date: 2026-06-02 14:25+0300\n"
+"Last-Translator: yandexru45\n"
 "Language-Team: none\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
@@ -28,6 +28,12 @@ msgstr "✘ Отключено"
 
 msgid "✘ Stopped"
 msgstr "✘ Остановлен"
+
+msgid "Группировать по странам"
+msgstr ""
+
+msgid "Группирует прокси подписки по флагу страны в начале тега в отдельные URLTest-группы"
+msgstr ""
 
 msgid "Active Connections"
 msgstr "Активные соединения"
@@ -227,17 +233,38 @@ msgstr "Введите доменные имена без протоколов, 
 msgid "Enter subnets in CIDR notation (e.g. 103.21.244.0/22) or single IP addresses"
 msgstr "Введите подсети в нотации CIDR (например, 103.21.244.0/22) или отдельные IP-адреса"
 
+msgid "Enter the subscription URL to fetch proxy configurations from your provider"
+msgstr ""
+
 msgid "Every 1 minute"
 msgstr "Каждую минуту"
 
+msgid "Every 12 hours"
+msgstr ""
+
+msgid "Every 3 hours"
+msgstr ""
+
 msgid "Every 3 minutes"
 msgstr "Каждые 3 минуты"
+
+msgid "Every 30 minutes"
+msgstr ""
 
 msgid "Every 30 seconds"
 msgstr "Каждые 30 секунд"
 
 msgid "Every 5 minutes"
 msgstr "Каждые 5 минут"
+
+msgid "Every 6 hours"
+msgstr ""
+
+msgid "Every day"
+msgstr ""
+
+msgid "Every hour"
+msgstr ""
 
 msgid "Exclude NTP"
 msgstr "Исключить NTP"
@@ -263,8 +290,17 @@ msgstr "Получить глобальную проверку"
 msgid "Global check"
 msgstr "Глобальная проверка"
 
+msgid "How often to automatically update the subscription"
+msgstr ""
+
 msgid "HTTP error"
 msgstr "Ошибка HTTP"
+
+msgid "Install extended"
+msgstr "Установить extended"
+
+msgid "Install stable"
+msgstr "Установить stable"
 
 msgid "Interface Monitoring"
 msgstr "Мониторинг интерфейса"
@@ -626,6 +662,9 @@ msgstr "Sing-box"
 msgid "Sing-box autostart disabled"
 msgstr "Автостарт sing-box отключен"
 
+msgid "Sing-box core changed, version:"
+msgstr "Ядро sing-box изменено, версия:"
+
 msgid "Sing-box installed"
 msgstr "Sing-box установлен"
 
@@ -664,6 +703,15 @@ msgstr "Запустить podkop"
 
 msgid "Stop podkop"
 msgstr "Остановить podkop"
+
+msgid "Subscription"
+msgstr ""
+
+msgid "Subscription Update Interval"
+msgstr ""
+
+msgid "Subscription URL"
+msgstr ""
 
 msgid "Successfully copied!"
 msgstr "Успешно скопировано!"

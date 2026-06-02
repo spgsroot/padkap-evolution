@@ -1,5 +1,12 @@
 import { callBaseMethod } from './callBaseMethod';
 import { ClashAPI, Podkop } from '../../types';
+import { executeShellCommand } from '../../../helpers';
+
+interface SingBoxComponentActionResult {
+  success: boolean;
+  version?: string;
+  message?: string;
+}
 
 export const PodkopShellMethods = {
   checkDNSAvailable: async () =>
@@ -86,4 +93,37 @@ export const PodkopShellMethods = {
     ),
   subscriptionUpdate: async () =>
     callBaseMethod<unknown>(Podkop.AvailableMethods.SUBSCRIPTION_UPDATE),
+  singBoxComponentAction: async (
+    action: 'install_extended' | 'install_stable' | 'check_update',
+  ): Promise<SingBoxComponentActionResult> => {
+    const response = await executeShellCommand({
+      command: '/usr/bin/podkop',
+      args: ['component_action', 'sing_box', action],
+      timeout: 600000,
+    });
+
+    if (response.stdout) {
+      try {
+        const parsed = JSON.parse(
+          response.stdout,
+        ) as SingBoxComponentActionResult;
+
+        return {
+          success: Boolean(parsed.success),
+          version: parsed.version,
+          message: parsed.message,
+        };
+      } catch (_e) {
+        return {
+          success: false,
+          message: response.stdout,
+        };
+      }
+    }
+
+    return {
+      success: false,
+      message: response.stderr || '',
+    };
+  },
 };

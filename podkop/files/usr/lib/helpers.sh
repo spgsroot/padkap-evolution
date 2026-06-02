@@ -609,9 +609,24 @@ get_kernel_version() {
 get_sing_box_version() {
     local version=""
     if command -v sing-box >/dev/null 2>&1; then
-        version="$(sing-box version 2>/dev/null | head -1 | awk '{print $NF}')"
+        version="$(sing-box version 2>/dev/null | head -n1 | awk '{print $NF}')"
     fi
     echo "${version:-1.0}"
+}
+
+# Returns 0 if the given (or detected) sing-box version is an "extended" build
+# Arguments:
+#   $1 - optional sing-box version string (defaults to get_sing_box_version)
+is_sing_box_extended() {
+    local version="${1:-}"
+
+    [ -n "$version" ] || version="$(get_sing_box_version)"
+
+    case "$version" in
+    *extended*) return 0 ;;
+    esac
+
+    return 1
 }
 
 # Generates a deterministic HWID based on WAN MAC address and device model

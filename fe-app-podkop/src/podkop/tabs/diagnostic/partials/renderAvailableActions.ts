@@ -27,6 +27,8 @@ interface IRenderAvailableActionsProps {
   globalCheck: ActionProps;
   viewLogs: ActionProps;
   showSingBoxConfig: ActionProps;
+  singBoxInstall: ActionProps;
+  singBoxExtended: 0 | 1;
 }
 
 export function renderAvailableActions({
@@ -38,6 +40,8 @@ export function renderAvailableActions({
   globalCheck,
   viewLogs,
   showSingBoxConfig,
+  singBoxInstall,
+  singBoxExtended,
 }: IRenderAvailableActionsProps) {
   return E('div', { class: 'pdk_diagnostic-page__right-bar__actions' }, [
     E('b', {}, _('Available actions')),
@@ -116,6 +120,15 @@ export function renderAvailableActions({
         text: _('Show sing-box config'),
         loading: showSingBoxConfig.loading,
         disabled: showSingBoxConfig.disabled,
+      }),
+    ]),
+    ...insertIf(singBoxInstall.visible, [
+      renderButton({
+        onClick: singBoxInstall.onClick,
+        icon: renderRotateCcwIcon24,
+        text: singBoxExtended ? _('Install stable') : _('Install extended'),
+        loading: singBoxInstall.loading,
+        disabled: singBoxInstall.disabled,
       }),
     ]),
   ]);

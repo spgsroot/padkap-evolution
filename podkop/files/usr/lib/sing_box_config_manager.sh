@@ -834,6 +834,61 @@ sing_box_cm_set_ws_transport_for_outbound() {
 }
 
 #######################################
+# Set XHTTP transport settings for an outbound in a sing-box JSON configuration.
+# Requires sing-box-extended on the router.
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   tag: string, identifier of the outbound to modify
+#   path: string, XHTTP path (defaults to "/" if empty)
+#   host: string, Host header for XHTTP (optional)
+#   mode: string, XHTTP mode (auto|packet-up|stream-up|stream-one; defaults to "auto")
+# Outputs:
+#   Writes updated JSON configuration to stdout
+# Example:
+#   CONFIG=$(sing_box_cm_set_xhttp_transport_for_outbound "$CONFIG" "vless-xhttp-out" "/path" "example.com" "auto")
+#######################################
+sing_box_cm_set_xhttp_transport_for_outbound() {
+    local config="$1"
+    local tag="$2"
+    local path="$3"
+    local host="$4"
+    local mode="$5"
+
+    case "$mode" in
+    auto | packet-up | stream-up | stream-one) ;;
+    *) mode="auto" ;;
+    esac
+
+    [ -n "$path" ] || path="/"
+
+    echo "$config" | jq \
+        --arg tag "$tag" \
+        --arg path "$path" \
+        --arg host "$host" \
+        --arg mode "$mode" \
+        '.outbounds |= map(
+            if .tag == $tag then
+                . + {
+                    transport: (
+                        {
+                            type: "xhttp",
+                            mode: $mode,
+                            path: $path,
+                            x_padding_bytes: "100-1000",
+                            no_grpc_header: false,
+                            sc_max_each_post_bytes: 1000000,
+                            sc_min_posts_interval_ms: 30
+                        }
+                        + (if $host != "" then {host: $host} else {} end)
+                    )
+                }
+            else
+                .
+            end
+        )'
+}
+
+#######################################
 # Set TLS settings for an outbound in a sing-box JSON configuration.
 # Arguments:
 #   config: string (JSON), sing-box configuration to modify

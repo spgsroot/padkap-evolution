@@ -19,6 +19,7 @@ export const initialDiagnosticStore: Pick<
     sing_box_version: 'loading',
     openwrt_version: 'loading',
     device_model: 'loading',
+    sing_box_extended: 0,
   },
   diagnosticsActions: {
     restart: {
@@ -43,6 +44,9 @@ export const initialDiagnosticStore: Pick<
       loading: false,
     },
     showSingBoxConfig: {
+      loading: false,
+    },
+    singBoxInstall: {
       loading: false,
     },
   },

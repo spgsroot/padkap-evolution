@@ -188,13 +188,19 @@ _add_outbound_security() {
 
     case "$security" in
     tls | reality)
-        local sni insecure alpn fingerprint public_key short_id
+        local sni insecure alpn fingerprint public_key short_id transport_type
         sni=$(url_get_query_param "$url" "sni")
         insecure=$(_get_insecure_query_param_from_url "$url")
         alpn=$(comma_string_to_json_array "$(url_get_query_param "$url" "alpn")")
         fingerprint=$(url_get_query_param "$url" "fp")
         public_key=$(url_get_query_param "$url" "pbk")
         short_id=$(url_get_query_param "$url" "sid")
+
+        # XHTTP transport defaults its ALPN to h2/http/1.1 when none is provided.
+        transport_type=$(url_get_query_param "$url" "type")
+        if [ "$transport_type" = "xhttp" ] && [ "$alpn" = "[]" ]; then
+            alpn='["h2","http/1.1"]'
+        fi
 
         if [ "$scheme" = "hysteria2" ] || [ "$scheme" = "hy2" ]; then
                 fingerprint=""
@@ -260,6 +266,20 @@ _add_outbound_transport() {
         config=$(
             sing_box_cm_set_grpc_transport_for_outbound "$config" "$outbound_tag" "$grpc_service_name"
         )
+        ;;
+    xhttp)
+        if ! is_sing_box_extended; then
+            log "XHTTP transport requires sing-box-extended. Install sing-box-extended and retry." "error"
+            echo "$config"
+            return 0
+        fi
+        local xhttp_path xhttp_host xhttp_sni xhttp_mode
+        xhttp_path=$(url_get_query_param "$url" "path")
+        xhttp_host=$(url_get_query_param "$url" "host")
+        xhttp_sni=$(url_get_query_param "$url" "sni")
+        [ -n "$xhttp_host" ] || xhttp_host="$xhttp_sni"
+        xhttp_mode=$(url_get_query_param "$url" "mode")
+        config=$(sing_box_cm_set_xhttp_transport_for_outbound "$config" "$outbound_tag" "$xhttp_path" "$xhttp_host" "$xhttp_mode")
         ;;
     *)
         log "Unknown transport '$transport' detected." "error"
@@ -411,6 +431,15 @@ sing_box_cf_add_subscription_outbounds() {
         # sing-box does not support top-level tls field for shadowsocks outbound.
         if [ "$outbound_type" = "shadowsocks" ] && [ "$outbound_tls_enabled" = "true" ]; then
             log "Skip unsupported Shadowsocks outbound with tls: '$display_name'" "warn"
+            i=$((i + 1))
+            continue
+        fi
+
+        # XHTTP transport requires sing-box-extended; skip such outbounds otherwise.
+        local outbound_transport_type
+        outbound_transport_type=$(echo "$outbound_json" | jq -r '.transport.type // ""' 2>/dev/null)
+        if [ "$outbound_transport_type" = "xhttp" ] && ! is_sing_box_extended; then
+            log "Skip unsupported XHTTP outbound (requires sing-box-extended): '$display_name'" "warn"
             i=$((i + 1))
             continue
         fi

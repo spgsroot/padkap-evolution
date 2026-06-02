@@ -29,6 +29,7 @@ async function fetchSystemInfo() {
       diagnosticsSystemInfo: {
         loading: false,
         ...systemInfo.data,
+        sing_box_extended: systemInfo.data.sing_box_extended === 1 ? 1 : 0,
       },
     });
   } else {
@@ -41,6 +42,7 @@ async function fetchSystemInfo() {
         sing_box_version: _('unknown'),
         openwrt_version: _('unknown'),
         device_model: _('unknown'),
+        sing_box_extended: 0,
       },
     });
   }
@@ -314,6 +316,45 @@ async function handleShowSingBoxConfig() {
   }
 }
 
+async function handleInstallSingBox() {
+  const diagnosticsActions = store.get().diagnosticsActions;
+  store.set({
+    diagnosticsActions: {
+      ...diagnosticsActions,
+      singBoxInstall: { loading: true },
+    },
+  });
+
+  const isExtended = store.get().diagnosticsSystemInfo.sing_box_extended === 1;
+
+  try {
+    const result = await PodkopShellMethods.singBoxComponentAction(
+      isExtended ? 'install_stable' : 'install_extended',
+    );
+
+    if (result.success) {
+      showToast(
+        _('Sing-box core changed, version: ') + (result.version || ''),
+        'success',
+      );
+    } else {
+      logger.error('[DIAGNOSTIC]', 'handleInstallSingBox - e', result);
+      showToast(result.message || _('Failed to execute!'), 'error');
+    }
+  } catch (e) {
+    logger.error('[DIAGNOSTIC]', 'handleInstallSingBox - e', e);
+    showToast(_('Failed to execute!'), 'error');
+  } finally {
+    store.set({
+      diagnosticsActions: {
+        ...diagnosticsActions,
+        singBoxInstall: { loading: false },
+      },
+    });
+    await fetchSystemInfo();
+  }
+}
+
 function renderWikiDisclaimerWidget() {
   const diagnosticsChecks = store.get().diagnosticsChecks;
 
@@ -402,6 +443,15 @@ function renderDiagnosticAvailableActionsWidget() {
       onClick: handleShowSingBoxConfig,
       disabled: atLeastOneServiceCommandLoading,
     },
+    singBoxInstall: {
+      loading: diagnosticsActions.singBoxInstall.loading,
+      visible: true,
+      onClick: handleInstallSingBox,
+      disabled:
+        atLeastOneServiceCommandLoading ||
+        diagnosticsActions.singBoxInstall.loading,
+    },
+    singBoxExtended: store.get().diagnosticsSystemInfo.sing_box_extended,
   });
 
   return preserveScrollForPage(() => {
@@ -456,7 +506,11 @@ async function onStoreUpdate(
     renderDiagnosticRunActionWidget();
   }
 
-  if (diff.diagnosticsActions || diff.servicesInfoWidget) {
+  if (
+    diff.diagnosticsActions ||
+    diff.servicesInfoWidget ||
+    diff.diagnosticsSystemInfo
+  ) {
     renderDiagnosticAvailableActionsWidget();
   }
 

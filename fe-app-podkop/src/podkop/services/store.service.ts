@@ -180,6 +180,7 @@ export interface StoreType {
     globalCheck: { loading: boolean };
     viewLogs: { loading: boolean };
     showSingBoxConfig: { loading: boolean };
+    singBoxInstall: { loading: boolean };
   };
   diagnosticsSystemInfo: {
     loading: boolean;
@@ -189,6 +190,7 @@ export interface StoreType {
     sing_box_version: string;
     openwrt_version: string;
     device_model: string;
+    sing_box_extended: 0 | 1;
   };
 }
 
