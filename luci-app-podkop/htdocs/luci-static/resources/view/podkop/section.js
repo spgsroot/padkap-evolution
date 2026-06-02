@@ -738,6 +738,17 @@ function createSectionContent(section) {
   o.datatype = "port";
   o.rmempty = true;
   o.depends("mixed_proxy_enabled", "1");
+
+  o = section.option(
+    form.Flag,
+    "resolve_real_ip_for_routing",
+    _("Resolve real IP for routing"),
+    _("Enable DNS resolve to get real IP when routing"),
+  );
+  o.default = "0";
+  o.rmempty = false;
+  o.depends("connection_type", "proxy");
+  o.depends("connection_type", "vpn");
 }
 
 const EntryPoint = {

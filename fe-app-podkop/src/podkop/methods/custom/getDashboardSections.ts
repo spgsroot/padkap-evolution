@@ -29,7 +29,9 @@ export async function getDashboardSections(): Promise<IGetDashboardSectionsRespo
   const data = configSections
     .filter(
       (section) =>
-        section.connection_type !== 'block' && section['.type'] !== 'settings',
+        section.connection_type !== 'block' &&
+        section.connection_type !== 'exclusion' &&
+        section['.type'] !== 'settings',
     )
     .map((section) => {
       if (section.connection_type === 'proxy') {
@@ -162,26 +164,29 @@ export async function getDashboardSections(): Promise<IGetDashboardSectionsRespo
           const fallbackUrltest = proxies.find(
             (proxy) => proxy.code === `${section['.name']}-urltest-out`,
           );
-          const selectorOutbounds = (selector?.value?.all ?? []).flatMap((code) => {
-            const item = proxies.find((proxy) => proxy.code === code);
-            if (!item) {
-              return [];
-            }
+          const selectorOutbounds = (selector?.value?.all ?? []).flatMap(
+            (code) => {
+              const item = proxies.find((proxy) => proxy.code === code);
+              if (!item) {
+                return [];
+              }
 
-            const isLegacyFastest = item.code === `${section['.name']}-urltest-out`;
+              const isLegacyFastest =
+                item.code === `${section['.name']}-urltest-out`;
 
-            return [
-              {
-                code: item.code,
-                displayName: isLegacyFastest
-                  ? _('Fastest')
-                  : item?.value?.name || '',
-                latency: item?.value?.history?.[0]?.delay || 0,
-                type: item?.value?.type || '',
-                selected: selector?.value?.now === item.code,
-              },
-            ];
-          });
+              return [
+                {
+                  code: item.code,
+                  displayName: isLegacyFastest
+                    ? _('Fastest')
+                    : item?.value?.name || '',
+                  latency: item?.value?.history?.[0]?.delay || 0,
+                  type: item?.value?.type || '',
+                  selected: selector?.value?.now === item.code,
+                },
+              ];
+            },
+          );
 
           const outbounds = [
             ...selectorOutbounds.filter(

@@ -453,18 +453,16 @@ function validateHysteria2Url(url) {
   try {
     const isHY2 = url.startsWith("hysteria2://");
     const isHY2Short = url.startsWith("hy2://");
-    if (!isHY2 && !isHY2Short) {
+    if (!isHY2 && !isHY2Short)
       return {
         valid: false,
         message: _("Invalid HY2 URL: must start with hysteria2:// or hy2://")
       };
-    }
-    if (/\s/.test(url)) {
+    if (/\s/.test(url))
       return {
         valid: false,
         message: _("Invalid HY2 URL: must not contain spaces")
       };
-    }
     const prefix = isHY2 ? "hysteria2://" : "hy2://";
     const body = url.slice(prefix.length);
     const [mainPart] = body.split("#");
@@ -483,50 +481,57 @@ function validateHysteria2Url(url) {
         message: _("Invalid HY2 URL: missing host & port")
       };
     const [host, port] = hostPortPart.split(":");
-    if (!host) {
+    if (!host)
       return { valid: false, message: _("Invalid HY2 URL: missing host") };
-    }
-    if (!port) {
+    if (!port)
       return { valid: false, message: _("Invalid HY2 URL: missing port") };
-    }
     const cleanedPort = port.replace("/", "");
-    const portNum = Number(cleanedPort);
-    if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+    const portEntries = cleanedPort.split(",");
+    const isValidPortNumber = (value) => {
+      if (!/^\d+$/.test(value)) return false;
+      const num = Number(value);
+      return num >= 1 && num <= 65535;
+    };
+    const isValidPortEntry = (entry) => {
+      if (!entry) return false;
+      if (!entry.includes("-")) return isValidPortNumber(entry);
+      const rangeParts = entry.split("-");
+      if (rangeParts.length !== 2) return false;
+      const [start, end] = rangeParts;
+      if (!isValidPortNumber(start) || !isValidPortNumber(end)) return false;
+      return Number(start) <= Number(end);
+    };
+    if (!portEntries.every(isValidPortEntry))
       return {
         valid: false,
         message: _("Invalid HY2 URL: invalid port number")
       };
-    }
     if (queryString) {
       const params = parseQueryString(queryString);
       const paramsKeys = Object.keys(params);
-      if (paramsKeys.includes("insecure") && !["0", "1"].includes(params.insecure)) {
+      if (paramsKeys.includes("insecure") && !["0", "1"].includes(params.insecure))
         return {
           valid: false,
           message: _("Invalid HY2 URL: insecure must be 0 or 1")
         };
-      }
       const validObfsTypes = ["none", "salamander"];
-      if (paramsKeys.includes("obfs") && !validObfsTypes.includes(params.obfs)) {
+      if (paramsKeys.includes("obfs") && !validObfsTypes.includes(params.obfs))
         return {
           valid: false,
           message: _("Invalid HY2 URL: unsupported obfs type")
         };
-      }
-      if (paramsKeys.includes("obfs") && params.obfs !== "none" && !params["obfs-password"]) {
+      if (paramsKeys.includes("obfs") && params.obfs !== "none" && !params["obfs-password"])
         return {
           valid: false,
           message: _(
             "Invalid HY2 URL: obfs-password required when obfs is set"
           )
         };
-      }
-      if (paramsKeys.includes("sni") && !params.sni) {
+      if (paramsKeys.includes("sni") && !params.sni)
         return {
           valid: false,
           message: _("Invalid HY2 URL: sni cannot be empty")
         };
-      }
     }
     return { valid: true, message: _("Valid") };
   } catch (_e) {
@@ -579,17 +584,9 @@ async function callBaseMethod(method, args = [], command = "/usr/bin/podkop") {
   });
   if (response.stdout) {
     try {
-      const data = JSON.parse(response.stdout);
-      if (data && typeof data === "object" && data.success === false) {
-        return {
-          success: false,
-          data,
-          error: data.message || data.error || ""
-        };
-      }
       return {
         success: true,
-        data
+        data: JSON.parse(response.stdout)
       };
     } catch (_e) {
       return {
@@ -721,7 +718,7 @@ async function getDashboardSections() {
     })
   );
   const data = configSections.filter(
-    (section) => section.connection_type !== "block" && section[".type"] !== "settings"
+    (section) => section.connection_type !== "block" && section.connection_type !== "exclusion" && section[".type"] !== "settings"
   ).map((section) => {
     if (section.connection_type === "proxy") {
       if (section.proxy_config_type === "url") {
@@ -786,7 +783,7 @@ async function getDashboardSections() {
         }));
         return {
           withTagSelect: true,
-          code: selector?.code || section[".name"] + "-out",
+          code: selector?.code || section[".name"],
           displayName: section[".name"],
           outbounds
         };
@@ -807,7 +804,7 @@ async function getDashboardSections() {
         }));
         return {
           withTagSelect: true,
-          code: selector?.code || section[".name"] + "-out",
+          code: selector?.code || section[".name"],
           displayName: section[".name"],
           outbounds: [
             {
@@ -828,20 +825,24 @@ async function getDashboardSections() {
         const fallbackUrltest = proxies.find(
           (proxy) => proxy.code === `${section[".name"]}-urltest-out`
         );
-        const selectorOutbounds = (selector?.value?.all ?? []).flatMap((code) => {
-          const item = proxies.find((proxy) => proxy.code === code);
-          if (!item) {
-            return [];
+        const selectorOutbounds = (selector?.value?.all ?? []).flatMap(
+          (code) => {
+            const item = proxies.find((proxy) => proxy.code === code);
+            if (!item) {
+              return [];
+            }
+            const isLegacyFastest = item.code === `${section[".name"]}-urltest-out`;
+            return [
+              {
+                code: item.code,
+                displayName: isLegacyFastest ? _("Fastest") : item?.value?.name || "",
+                latency: item?.value?.history?.[0]?.delay || 0,
+                type: item?.value?.type || "",
+                selected: selector?.value?.now === item.code
+              }
+            ];
           }
-          const isLegacyFastest = item.code === `${section[".name"]}-urltest-out`;
-          return [{
-            code: item.code,
-            displayName: isLegacyFastest ? _("Fastest") : item?.value?.name || "",
-            latency: item?.value?.history?.[0]?.delay || 0,
-            type: item?.value?.type || "",
-            selected: selector?.value?.now === item.code
-          }];
-        });
+        );
         const outbounds = [
           ...selectorOutbounds.filter(
             (item) => item.type?.toLowerCase() === "urltest"
@@ -860,7 +861,7 @@ async function getDashboardSections() {
           }));
           return {
             withTagSelect: true,
-            code: selector?.code || section[".name"] + "-out",
+            code: selector?.code || section[".name"],
             displayName: section[".name"],
             outbounds: [
               {
@@ -876,7 +877,7 @@ async function getDashboardSections() {
         }
         return {
           withTagSelect: true,
-          code: selector?.code || section[".name"] + "-out",
+          code: selector?.code || section[".name"],
           displayName: section[".name"],
           outbounds
         };
@@ -2153,10 +2154,7 @@ async function connectToClashSockets() {
   );
 }
 async function handleChooseOutbound(selector, tag) {
-  const response = await PodkopShellMethods.setClashApiGroupProxy(selector, tag);
-  if (!response.success || response.data?.success === false) {
-    showToast(response.data?.message || _("Failed to switch proxy"), "error");
-  }
+  await PodkopShellMethods.setClashApiGroupProxy(selector, tag);
   await fetchDashboardSections();
 }
 async function handleTestGroupLatency(tag) {
@@ -4006,6 +4004,49 @@ async function runSectionsCheck() {
   }
 }
 
+// src/helpers/removeVersionPrefix.ts
+function removeVersionPrefix(version) {
+  return version.replace(/^v/, "");
+}
+
+// src/podkop/tabs/diagnostic/helpers/getPodkopVersionRow.ts
+function isUnknownVersion(version) {
+  return version === "unknown" || version === _("unknown");
+}
+function getPodkopVersionRow(diagnosticsSystemInfo) {
+  const loading = diagnosticsSystemInfo.loading;
+  const unknown = isUnknownVersion(diagnosticsSystemInfo.podkop_version);
+  const hasActualVersion = Boolean(diagnosticsSystemInfo.podkop_latest_version) && !isUnknownVersion(diagnosticsSystemInfo.podkop_latest_version);
+  const version = normalizeCompiledVersion(
+    diagnosticsSystemInfo.podkop_version
+  );
+  const isDevVersion = version === "dev";
+  if (loading || unknown || !hasActualVersion || isDevVersion) {
+    return {
+      key: "Podkop",
+      value: version
+    };
+  }
+  if (removeVersionPrefix(version) !== removeVersionPrefix(diagnosticsSystemInfo.podkop_latest_version)) {
+    return {
+      key: "Podkop",
+      value: version,
+      tag: {
+        label: _("Outdated"),
+        kind: "warning"
+      }
+    };
+  }
+  return {
+    key: "Podkop",
+    value: version,
+    tag: {
+      label: _("Latest"),
+      kind: "success"
+    }
+  };
+}
+
 // src/podkop/tabs/diagnostic/initController.ts
 async function fetchSystemInfo() {
   const systemInfo = await PodkopShellMethods.getSystemInfo();
@@ -4353,47 +4394,9 @@ function renderDiagnosticSystemInfoWidget() {
   logger.debug("[DIAGNOSTIC]", "renderDiagnosticSystemInfoWidget");
   const diagnosticsSystemInfo = store.get().diagnosticsSystemInfo;
   const container = document.getElementById("pdk_diagnostic-page-system-info");
-  function getPodkopVersionRow() {
-    const loading = diagnosticsSystemInfo.loading;
-    const unknown = diagnosticsSystemInfo.podkop_version === _("unknown");
-    const hasActualVersion = Boolean(diagnosticsSystemInfo.podkop_latest_version) && diagnosticsSystemInfo.podkop_latest_version !== "unknown";
-    const version = normalizeCompiledVersion(
-      diagnosticsSystemInfo.podkop_version
-    );
-    const isDevVersion = version === "dev";
-    if (loading || unknown || !hasActualVersion || isDevVersion) {
-      return {
-        key: "Podkop",
-        value: version
-      };
-    }
-    if (version !== `v${diagnosticsSystemInfo.podkop_latest_version}`) {
-      logger.debug(
-        "[DIAGNOSTIC]",
-        "diagnosticsSystemInfo",
-        diagnosticsSystemInfo
-      );
-      return {
-        key: "Podkop",
-        value: version,
-        tag: {
-          label: _("Outdated"),
-          kind: "warning"
-        }
-      };
-    }
-    return {
-      key: "Podkop",
-      value: version,
-      tag: {
-        label: _("Latest"),
-        kind: "success"
-      }
-    };
-  }
   const renderedSystemInfo = renderSystemInfo({
     items: [
-      getPodkopVersionRow(),
+      getPodkopVersionRow(diagnosticsSystemInfo),
       {
         key: "Luci App",
         value: normalizeCompiledVersion(PODKOP_LUCI_APP_VERSION)
@@ -4975,6 +4978,7 @@ return baseclass.extend({
   REGIONAL_OPTIONS,
   RemoteFakeIPMethods,
   STATUS_COLORS,
+  SUBSCRIPTION_UPDATE_INTERVAL_OPTIONS,
   TabService,
   TabServiceInstance,
   UPDATE_INTERVAL_OPTIONS,
