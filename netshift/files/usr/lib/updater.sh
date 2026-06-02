@@ -218,10 +218,19 @@ updates_restart_netshift() {
 
 # Downloads and installs sing-box-extended, replacing /usr/bin/sing-box.
 # Echoes a JSON result on stdout.
+#
+# Disk-space note: routers mount /tmp as tmpfs (RAM), often only ~32-64 MB.
+# The downloaded archive (~26 MB) already consumes most of it, so the binary
+# backups must NOT also live in /tmp or the backup `cp` fails with ENOSPC
+# (observed as "Failed to backup current sing-box binary"). We therefore keep
+# the backups next to their targets on the persistent overlay filesystem
+# (same fs as /usr/bin and /usr/lib) and free the archive from tmpfs as soon
+# as both members have been extracted.
 updates_install_sing_box_extended() {
     local tmp_dir archive releases tag rel asset_url
-    local binary_path cronet_path
-    local backup_binary backup_cronet new_version
+    local binary_path cronet_path new_binary new_cronet
+    local backup_binary="" backup_cronet="" new_version
+    local extract_failed=0
 
     if ! updates_resolve_sing_box_extended_arch_suffix; then
         updates_log "Unsupported architecture for sing-box-extended" "error"
@@ -276,50 +285,74 @@ updates_install_sing_box_extended() {
     fi
     cronet_path="$(tar -tzf "$archive" 2>/dev/null | grep -E '(^|/)libcronet\.so$' | sed -n '1p')"
 
-    backup_binary=""
-    if [ -e /usr/bin/sing-box ]; then
-        backup_binary="$tmp_dir/sing-box.backup"
-        if ! cp -p /usr/bin/sing-box "$backup_binary"; then
-            rm -rf "$tmp_dir"
-            updates_log "Failed to backup current sing-box binary" "error"
-            echo "{\"success\":false,\"message\":\"Failed to backup current sing-box binary\"}"
-            return 1
-        fi
-        rm -f /usr/bin/sing-box
-    fi
+    # Stage the new members from the archive onto the persistent fs next to
+    # /usr/bin, then free the archive from tmpfs BEFORE we touch the live
+    # binary. This keeps tmpfs peak usage at just the archive size.
+    new_binary="/usr/bin/sing-box.netshift-new"
+    new_cronet="/usr/lib/libcronet.so.netshift-new"
+    rm -f "$new_binary" "$new_cronet"
 
-    backup_cronet=""
-    if [ -n "$cronet_path" ] && [ -e /usr/lib/libcronet.so ]; then
-        backup_cronet="$tmp_dir/libcronet.so.backup"
-        if ! cp -p /usr/lib/libcronet.so "$backup_cronet"; then
-            [ -n "$backup_binary" ] && mv -f "$backup_binary" /usr/bin/sing-box
-            rm -rf "$tmp_dir"
-            updates_log "Failed to backup current libcronet.so" "error"
-            echo "{\"success\":false,\"message\":\"Failed to backup current libcronet.so\"}"
-            return 1
-        fi
-        rm -f /usr/lib/libcronet.so
+    if ! tar -xzf "$archive" -O "$binary_path" > "$new_binary" 2>/dev/null || [ ! -s "$new_binary" ]; then
+        extract_failed=1
     fi
+    if [ "$extract_failed" -eq 0 ] && [ -n "$cronet_path" ]; then
+        if ! tar -xzf "$archive" -O "$cronet_path" > "$new_cronet" 2>/dev/null || [ ! -s "$new_cronet" ]; then
+            extract_failed=1
+        fi
+    fi
+    # Archive no longer needed; reclaim tmpfs immediately.
+    rm -f "$archive"
 
-    if ! tar -xzf "$archive" -O "$binary_path" > /usr/bin/sing-box 2>/dev/null || [ ! -s /usr/bin/sing-box ]; then
-        rm -f /usr/bin/sing-box
-        [ -n "$backup_binary" ] && mv -f "$backup_binary" /usr/bin/sing-box
-        [ -n "$backup_cronet" ] && mv -f "$backup_cronet" /usr/lib/libcronet.so
+    if [ "$extract_failed" -ne 0 ]; then
+        rm -f "$new_binary" "$new_cronet"
         rm -rf "$tmp_dir"
         updates_log "Failed to extract sing-box-extended binary" "error"
         echo "{\"success\":false,\"message\":\"Failed to extract sing-box-extended binary\"}"
         return 1
     fi
+
+    # Back up the current binary/lib ON THE PERSISTENT FS (never in tmpfs).
+    if [ -e /usr/bin/sing-box ]; then
+        backup_binary="/usr/bin/sing-box.netshift-backup"
+        if ! cp -p /usr/bin/sing-box "$backup_binary" 2>/dev/null; then
+            rm -f "$new_binary" "$new_cronet" "$backup_binary"
+            rm -rf "$tmp_dir"
+            updates_log "Failed to backup current sing-box binary" "error"
+            echo "{\"success\":false,\"message\":\"Failed to backup current sing-box binary\"}"
+            return 1
+        fi
+    fi
+    if [ -n "$cronet_path" ] && [ -e /usr/lib/libcronet.so ]; then
+        backup_cronet="/usr/lib/libcronet.so.netshift-backup"
+        if ! cp -p /usr/lib/libcronet.so "$backup_cronet" 2>/dev/null; then
+            rm -f "$new_binary" "$new_cronet" "$backup_binary" "$backup_cronet"
+            rm -rf "$tmp_dir"
+            updates_log "Failed to backup current libcronet.so" "error"
+            echo "{\"success\":false,\"message\":\"Failed to backup current libcronet.so\"}"
+            return 1
+        fi
+    fi
+
+    # Swap the staged members into place (mv on the same fs is atomic + free).
+    if ! mv -f "$new_binary" /usr/bin/sing-box; then
+        rm -f "$new_binary" "$new_cronet"
+        [ -n "$backup_binary" ] && mv -f "$backup_binary" /usr/bin/sing-box
+        [ -n "$backup_cronet" ] && mv -f "$backup_cronet" /usr/lib/libcronet.so
+        rm -rf "$tmp_dir"
+        updates_log "Failed to install sing-box-extended binary" "error"
+        echo "{\"success\":false,\"message\":\"Failed to install sing-box-extended binary\"}"
+        return 1
+    fi
     chmod 0755 /usr/bin/sing-box
 
     if [ -n "$cronet_path" ]; then
-        if ! tar -xzf "$archive" -O "$cronet_path" > /usr/lib/libcronet.so 2>/dev/null || [ ! -s /usr/lib/libcronet.so ]; then
-            rm -f /usr/bin/sing-box /usr/lib/libcronet.so
+        if ! mv -f "$new_cronet" /usr/lib/libcronet.so; then
+            rm -f /usr/bin/sing-box "$new_cronet"
             [ -n "$backup_binary" ] && mv -f "$backup_binary" /usr/bin/sing-box
             [ -n "$backup_cronet" ] && mv -f "$backup_cronet" /usr/lib/libcronet.so
             rm -rf "$tmp_dir"
-            updates_log "Failed to extract libcronet.so" "error"
-            echo "{\"success\":false,\"message\":\"Failed to extract libcronet.so\"}"
+            updates_log "Failed to install libcronet.so" "error"
+            echo "{\"success\":false,\"message\":\"Failed to install libcronet.so\"}"
             return 1
         fi
         chmod 0644 /usr/lib/libcronet.so
