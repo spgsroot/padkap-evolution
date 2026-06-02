@@ -5,7 +5,6 @@
 [![Release](https://img.shields.io/github/v/release/yandexru45/podkop-evolution?style=flat-square)](https://github.com/yandexru45/podkop-evolution/releases)
 [![License](https://img.shields.io/badge/license-GPL--2.0--or--later-blue?style=flat-square)](LICENSE)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-24.10%2B-orange?style=flat-square)](https://openwrt.org/)
-[![Docs](https://img.shields.io/badge/docs-podkop.net-informational?style=flat-square)](https://podkop.net/)
 
 </div>
 

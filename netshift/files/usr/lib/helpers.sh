@@ -1,15 +1,16 @@
+# shellcheck shell=ash
 # Check if string is valid IPv4
 is_ipv4() {
     local ip="$1"
-    local regex="^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$"
-    [[ "$ip" =~ $regex ]]
+    local regex='^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.?){4}$'
+    echo "$ip" | grep -Eq "$regex"
 }
 
 # Check if string is valid IPv4 with CIDR mask
 is_ipv4_cidr() {
     local ip="$1"
-    local regex="^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}(\/(3[0-2]|2[0-9]|1[0-9]|[0-9]))$"
-    [[ "$ip" =~ $regex ]]
+    local regex='^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])\.?){4}(/(3[0-2]|2[0-9]|1[0-9]|[0-9]))$'
+    echo "$ip" | grep -Eq "$regex"
 }
 
 is_ipv4_ip_or_ipv4_cidr() {
@@ -20,7 +21,7 @@ is_domain() {
     local str="$1"
     local regex='^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$'
 
-    [[ "$str" =~ $regex ]]
+    echo "$str" | grep -Eq "$regex"
 }
 
 is_domain_suffix() {
@@ -45,7 +46,7 @@ is_shadowsocks_userinfo_format() {
     local str="$1"
     local regex='^[^:]+:[^:]+(:[^:]+)?$'
 
-    [[ "$str" =~ $regex ]]
+    echo "$str" | grep -Eq "$regex"
 }
 
 # Compares the current package version with the required minimum
@@ -63,7 +64,7 @@ is_min_package_version() {
 file_exists() {
     local filepath="$1"
 
-    if [[ -f "$filepath" ]]; then
+    if [ -f "$filepath" ]; then
         return 0
     else
         return 1
@@ -114,7 +115,8 @@ comma_string_to_json_array() {
         return
     fi
 
-    local replaced="${input//,/\",\"}"
+    local replaced
+    replaced=$(printf '%s' "$input" | sed 's/,/","/g')
 
     echo "[\"$replaced\"]"
 }
@@ -156,7 +158,10 @@ url_get_port() {
     url="${url#*@}"
     url="${url%%[/?#]*}"
 
-    [[ "$url" == *:* ]] && echo "${url#*:}" || echo ""
+    case "$url" in
+    *:*) echo "${url#*:}" ;;
+    *) echo "" ;;
+    esac
 }
 
 # Extracts the path from a URL (without query or fragment; returns "/" if empty)
@@ -218,7 +223,7 @@ base64_decode() {
 
 # Generates a unique 16-character ID based on the current timestamp and a random number
 gen_id() {
-    printf '%s%s' "$(date +%s)" "$RANDOM" | md5sum | cut -c1-16
+    { date +%s; head -c 16 /dev/urandom; } | md5sum | cut -c1-16
 }
 
 # Adds a missing UCI option with the given value if it does not exist
@@ -513,7 +518,7 @@ download_to_file() {
 convert_crlf_to_lf() {
     local filepath="$1"
 
-    if grep -q $'\r' "$filepath"; then
+    if grep -q "$(printf '\r')" "$filepath"; then
         log "File '$filepath' contains CRLF line endings. Converting to LF..." "debug"
         local tmpfile
         tmpfile=$(mktemp)

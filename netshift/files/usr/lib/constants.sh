@@ -1,3 +1,4 @@
+# shellcheck shell=ash
 # shellcheck disable=SC2034
 
 NETSHIFT_VERSION="__COMPILED_VERSION_VARIABLE__"

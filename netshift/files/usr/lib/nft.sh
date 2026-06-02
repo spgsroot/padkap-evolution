@@ -1,3 +1,4 @@
+# shellcheck shell=ash
 # Create an nftables table in the inet family
 nft_create_table() {
     local name="$1"

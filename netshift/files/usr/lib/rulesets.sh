@@ -1,3 +1,4 @@
+# shellcheck shell=ash
 # Constructs and returns a ruleset tag using section, name, optional type, and a fixed postfix
 get_ruleset_tag() {
     local section="$1"
@@ -163,8 +164,7 @@ decompile_binary_ruleset() {
     local output_filepath="$2"
 
     log "Decompiling $binary_filepath to $output_filepath" "debug"
-    sing-box rule-set decompile "$binary_filepath" -o "$output_filepath"
-    if [[ $? -ne 0 ]]; then
+    if ! sing-box rule-set decompile "$binary_filepath" -o "$output_filepath"; then
         log "Decompilation command failed for $binary_filepath" "error"
         return 1
     fi

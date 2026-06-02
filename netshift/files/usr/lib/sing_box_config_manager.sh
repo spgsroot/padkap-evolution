@@ -1,3 +1,4 @@
+# shellcheck shell=ash
 #
 # Module: sing_box_config_manager.sh
 #
