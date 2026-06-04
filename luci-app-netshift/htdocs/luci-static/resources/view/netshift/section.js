@@ -35,7 +35,7 @@ function createSectionContent(section) {
     form.TextValue,
     "proxy_string",
     _("Proxy Configuration URL"),
-    _("vless://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links")
+    _("vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links")
   );
   o.depends({ connection_type: "proxy", proxy_config_type: "url" });
   o.rows = 5;
@@ -153,7 +153,7 @@ function createSectionContent(section) {
     form.DynamicList,
     "selector_proxy_links",
     _("Selector Proxy Links"),
-    _("vless://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links")
+    _("vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links")
   );
   o.depends({ connection_type: "proxy", proxy_config_type: "selector" });
   o.rmempty = false;
@@ -176,7 +176,7 @@ function createSectionContent(section) {
     form.DynamicList,
     "urltest_proxy_links",
     _("URLTest Proxy Links"),
-    _("vless://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links")
+    _("vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links")
   );
   o.depends({ connection_type: "proxy", proxy_config_type: "urltest" });
   o.rmempty = false;

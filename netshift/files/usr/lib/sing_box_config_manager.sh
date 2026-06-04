@@ -623,6 +623,56 @@ sing_box_cm_add_vless_outbound() {
 }
 
 #######################################
+# Add a VMess outbound to the outbounds section of a sing-box JSON configuration.
+# Requires sing-box-extended on the router (gated by the facade).
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   tag: string, identifier for the outbound
+#   server_address: string, IP address or hostname of the VMess server
+#   server_port: integer, port of the VMess server
+#   uuid: string, user UUID
+#   security: string, encryption method (optional; defaults to "auto" when empty)
+#   alter_id: integer, alterId (optional; omitted when empty or 0)
+# Outputs:
+#   Writes updated JSON configuration to stdout
+# Example:
+#   CONFIG=$(
+#       sing_box_cm_add_vmess_outbound "$CONFIG" "vmess-out" "example.com" 443 \
+#       "bf000d23-0752-40b4-affe-68f7707a9661" "auto" "0"
+#   )
+#######################################
+sing_box_cm_add_vmess_outbound() {
+    local config="$1"
+    local tag="$2"
+    local server_address="$3"
+    local server_port="$4"
+    local uuid="$5"
+    local security="$6"
+    local alter_id="$7"
+
+    [ -n "$security" ] || security="auto"
+
+    echo "$config" | jq \
+        --arg tag "$tag" \
+        --arg server_address "$server_address" \
+        --arg server_port "$server_port" \
+        --arg uuid "$uuid" \
+        --arg security "$security" \
+        --arg alter_id "$alter_id" \
+        '.outbounds += [(
+            {
+              type: "vmess",
+              tag: $tag,
+              server: $server_address,
+              server_port: ($server_port | tonumber),
+              uuid: $uuid,
+              security: $security
+            }
+            + (if $alter_id != "" and $alter_id != "0" then {alter_id: ($alter_id | tonumber)} else {} end)
+        )]'
+}
+
+#######################################
 # Add a Trojan outbound to the outbounds section of a sing-box JSON configuration.
 # Arguments:
 #   config: string (JSON), sing-box configuration to modify
@@ -826,6 +876,45 @@ sing_box_cm_set_ws_transport_for_outbound() {
                         + (if $early_data_header_name != "" then
                             {early_data_header_name: $early_data_header_name}
                         else {} end)
+                    )
+                }
+            else
+                .
+            end
+        )'
+}
+
+#######################################
+# Set HTTP/2 transport settings for an outbound in a sing-box JSON configuration.
+# Used for VMess net=h2 links (sing-box "http" transport). HTTP/2 transport
+# mandates TLS, so the caller must also set TLS on the outbound.
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   tag: string, identifier of the outbound to modify
+#   path: string, HTTP path (optional)
+#   host: string, Host header (single host; optional)
+# Outputs:
+#   Writes updated JSON configuration to stdout
+# Example:
+#   CONFIG=$(sing_box_cm_set_http_transport_for_outbound "$CONFIG" "vmess-out" "/path" "example.com")
+#######################################
+sing_box_cm_set_http_transport_for_outbound() {
+    local config="$1"
+    local tag="$2"
+    local path="$3"
+    local host="$4"
+
+    echo "$config" | jq \
+        --arg tag "$tag" \
+        --arg path "$path" \
+        --arg host "$host" \
+        '.outbounds |= map(
+            if .tag == $tag then
+                . + {
+                    transport: (
+                        { type: "http" }
+                        + (if $path != "" then {path: $path} else {} end)
+                        + (if $host != "" then {host: [$host]} else {} end)
                     )
                 }
             else

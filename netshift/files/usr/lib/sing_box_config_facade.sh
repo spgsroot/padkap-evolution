@@ -62,6 +62,12 @@ sing_box_cf_add_proxy_outbound() {
     local url="$3"
     local udp_over_tcp="$4"
 
+    # Keep the RAW (pre-url_decode) link for schemes that base64-decode the
+    # WHOLE payload (vmess). url_decode rewrites '+'->space, which corrupts
+    # standard base64 bodies (the '+' is in the base64 alphabet). See the
+    # vmess) case below.
+    local raw_url="$3"
+
     url=$(url_decode "$url")
     url=$(url_strip_fragment "$url")
 
@@ -162,6 +168,57 @@ sing_box_cf_add_proxy_outbound() {
         config=$(sing_box_cm_add_hysteria2_outbound "$config" "$tag" "$host" "$port" "$password" "$obfuscator_type" \
             "$obfuscator_password" "$upload_mbps" "$download_mbps")
         config=$(_add_outbound_security "$config" "$tag" "$url")
+        ;;
+    vmess)
+        # ─── REFERENCE EXTENDED-GATING PATTERN (Tier-1 protocols copy this) ───
+        # Generation is gated behind sing-box-extended. On a stock sing-box build
+        # we log a clear message and return the config UNCHANGED (no exit 1, no
+        # outbound added) so generation degrades safely and keeps the last-good
+        # config. tuic/hysteria1/anytls/shadowtls reuse this exact block.
+        if ! is_sing_box_extended; then
+            log "VMess requires sing-box-extended. Install sing-box-extended and retry." "error"
+            echo "$config"
+            return 0
+        fi
+        # ─────────────────────────────────────────────────────────────────────
+
+        local tag vmess_json vm_server vm_port vm_uuid vm_security vm_alter_id
+        local vm_net vm_host vm_path vm_tls vm_sni vm_alpn vm_fp
+
+        tag=$(get_outbound_tag_by_section "$section")
+
+        # Primary format: vmess://base64(JSON) (V2RayN). The URL form
+        # (vmess://<uuid>@<host>:<port>?...) is a phase-2 follow-on; not handled here.
+        #
+        # CRITICAL: VMess base64-decodes the WHOLE payload, so it MUST use the
+        # RAW pre-url_decode link ($raw_url, NOT $url). url_decode rewrites
+        # '+'->space, which would corrupt standard base64 bodies containing '+'.
+        # Future Tier-1 copiers (tuic/etc.) that base64-decode a whole payload
+        # MUST also use $raw_url for the same reason.
+        vmess_json=$(vmess_link_to_json "$raw_url")
+        if [ -z "$vmess_json" ] || ! echo "$vmess_json" | jq -e 'type == "object"' > /dev/null 2>&1; then
+            log "Cannot decode VMess link or it does not match the expected base64(JSON) format. Aborted." "fatal"
+            exit 1
+        fi
+
+        # Numbers-as-strings are tolerated: extract every field as a string.
+        vm_server=$(echo "$vmess_json" | jq -r '.add // ""')
+        vm_port=$(echo "$vmess_json" | jq -r '.port // "" | tostring')
+        vm_uuid=$(echo "$vmess_json" | jq -r '.id // ""')
+        vm_security=$(echo "$vmess_json" | jq -r '.scy // "" | tostring')
+        vm_alter_id=$(echo "$vmess_json" | jq -r '.aid // "" | tostring')
+        vm_net=$(echo "$vmess_json" | jq -r '.net // "" | tostring')
+        vm_host=$(echo "$vmess_json" | jq -r '.host // "" | tostring')
+        vm_path=$(echo "$vmess_json" | jq -r '.path // "" | tostring')
+        vm_tls=$(echo "$vmess_json" | jq -r '.tls // "" | tostring')
+        vm_sni=$(echo "$vmess_json" | jq -r '.sni // "" | tostring')
+        vm_alpn=$(echo "$vmess_json" | jq -r '.alpn // "" | tostring')
+        vm_fp=$(echo "$vmess_json" | jq -r '.fp // "" | tostring')
+
+        config=$(sing_box_cm_add_vmess_outbound "$config" "$tag" "$vm_server" "$vm_port" "$vm_uuid" \
+            "$vm_security" "$vm_alter_id")
+        config=$(_add_vmess_transport_and_security "$config" "$tag" "$vm_net" "$vm_host" "$vm_path" \
+            "$vm_tls" "$vm_sni" "$vm_alpn" "$vm_fp" "$vm_server")
         ;;
     *)
         log "Unsupported proxy $scheme type. Aborted." "fatal"
@@ -286,6 +343,89 @@ _add_outbound_transport() {
         log "Unknown transport '$transport' detected." "error"
         ;;
     esac
+
+    echo "$config"
+}
+
+#######################################
+# Apply VMess TLS + transport to an already-added vmess outbound.
+# VMess (V2RayN base64-JSON) carries transport in the JSON `net` field and TLS
+# in `tls`/`sni`/`alpn`/`fp` — NOT in URL query params. So we do NOT route
+# through _add_outbound_security / _add_outbound_transport (which read
+# url_get_query_param); we set everything from the decoded-JSON values here.
+# Arguments:
+#   config: string (JSON), sing-box configuration to modify
+#   tag: string, outbound tag to mutate
+#   net: string, vmess `net` (ws|grpc|h2|tcp|"")
+#   host: string, vmess `host`
+#   path: string, vmess `path`
+#   tls: string, vmess `tls` ("tls"/"1"/"true" enables TLS)
+#   sni: string, vmess `sni`
+#   alpn: string, vmess `alpn` (comma-separated)
+#   fp: string, vmess `fp` (uTLS fingerprint)
+#   server: string, vmess `add` (TLS server_name fallback when sni is empty)
+# Outputs:
+#   Writes updated JSON configuration to stdout
+#######################################
+_add_vmess_transport_and_security() {
+    local config="$1"
+    local outbound_tag="$2"
+    local net="$3"
+    local host="$4"
+    local path="$5"
+    local tls="$6"
+    local sni="$7"
+    local alpn="$8"
+    local fp="$9"
+    local server="${10}"
+
+    # Transport from `net` (NOT a query `type`).
+    local tls_required=0
+    case "$net" in
+    ws)
+        config=$(sing_box_cm_set_ws_transport_for_outbound "$config" "$outbound_tag" "$path" "$host")
+        ;;
+    grpc)
+        # The core derives the gRPC serviceName from `path` (falls back to `host`).
+        local grpc_service_name="$path"
+        [ -n "$grpc_service_name" ] || grpc_service_name="$host"
+        config=$(sing_box_cm_set_grpc_transport_for_outbound "$config" "$outbound_tag" "$grpc_service_name")
+        ;;
+    h2)
+        # HTTP/2 transport mandates TLS.
+        config=$(sing_box_cm_set_http_transport_for_outbound "$config" "$outbound_tag" "$path" "$host")
+        tls_required=1
+        ;;
+    tcp | "") ;;
+    *)
+        log "Unknown VMess transport '$net' detected." "error"
+        ;;
+    esac
+
+    # TLS from `tls` (or forced by h2 transport).
+    local tls_enabled=0
+    case "$tls" in
+    tls | 1 | true) tls_enabled=1 ;;
+    esac
+    [ "$tls_required" -eq 1 ] && tls_enabled=1
+
+    if [ "$tls_enabled" -eq 1 ]; then
+        local server_name alpn_json
+        server_name="$sni"
+        [ -n "$server_name" ] || server_name="$server"
+        alpn_json=$(comma_string_to_json_array "$alpn")
+        config=$(
+            sing_box_cm_set_tls_for_outbound \
+                "$config" \
+                "$outbound_tag" \
+                "$server_name" \
+                "" \
+                "$([ "$alpn_json" = "[]" ] && echo null || echo "$alpn_json")" \
+                "$fp" \
+                "" \
+                ""
+        )
+    fi
 
     echo "$config"
 }

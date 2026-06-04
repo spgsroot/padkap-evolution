@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: NETSHIFT\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-04 19:41+0300\n"
-"PO-Revision-Date: 2026-06-04 19:41+0300\n"
+"POT-Creation-Date: 2026-06-04 22:59+0300\n"
+"PO-Revision-Date: 2026-06-04 22:59+0300\n"
 "Last-Translator: yandexru45\n"
 "Language-Team: none\n"
 "Language: ru\n"
@@ -449,6 +449,27 @@ msgstr "Неверный формат URL"
 msgid "Invalid VLESS URL: parsing failed"
 msgstr "Неверный URL VLESS: ошибка разбора"
 
+msgid "Invalid VMess URL: invalid port"
+msgstr "Неверный URL VMess: недопустимый порт"
+
+msgid "Invalid VMess URL: malformed base64"
+msgstr "Неверный URL VMess: некорректный base64"
+
+msgid "Invalid VMess URL: malformed JSON"
+msgstr "Неверный URL VMess: некорректный JSON"
+
+msgid "Invalid VMess URL: missing address"
+msgstr "Неверный URL VMess: отсутствует адрес"
+
+msgid "Invalid VMess URL: missing id"
+msgstr "Неверный URL VMess: отсутствует id"
+
+msgid "Invalid VMess URL: must not contain spaces"
+msgstr "Неверный URL VMess: не должен содержать пробелы"
+
+msgid "Invalid VMess URL: must start with vmess://"
+msgstr "Неверный URL VMess: должен начинаться с vmess://"
+
 msgid "IP address 0.0.0.0 is not allowed"
 msgstr "IP-адрес 0.0.0.0 не допускается"
 
@@ -788,8 +809,8 @@ msgstr "Неизвестная ошибка"
 msgid "Uplink"
 msgstr "Исходящий"
 
-msgid "URL must start with vless://, ss://, trojan://, socks4/5://, or hysteria2://hy2://"
-msgstr "URL должен начинаться с vless://, ss://, trojan://, socks4/5:// или hysteria2:// hy2://"
+msgid "URL must start with vless://, vmess://, ss://, trojan://, socks4/5://, or hysteria2://hy2://"
+msgstr "URL должен начинаться с vless://, vmess://, ss://, trojan://, socks4/5:// или hysteria2:// hy2://"
 
 msgid "URL must use one of the following protocols:"
 msgstr "URL должен использовать один из следующих протоколов:"
@@ -839,8 +860,8 @@ msgstr "Посмотреть логи"
 msgid "Visit Wiki"
 msgstr "Перейти в wiki"
 
-msgid "vless://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links"
-msgstr ""
+msgid "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links"
+msgstr "ссылки vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2://"
 
 msgid "Warning: %s cannot be used together with %s. Previous selections have been removed."
 msgstr "Предупреждение: %s нельзя использовать вместе с %s. Предыдущие варианты были удалены."

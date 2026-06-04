@@ -406,6 +406,104 @@ test_sing_box_config() {
     fi
 
     rm -f "$test_config" "${test_config}.2" "${test_config}.3" "${test_config}.4" "${test_config}.5"
+
+    # ── VMess vmess://base64(JSON) parse path (facade) ─────────────────────
+    # Validate the GENERATED outbound JSON SHAPE with jq (NOT a live sing-box
+    # check): the test container's sing-box is the stock build, which rejects
+    # the vmess type, so we assert shape only. The extended gate is exercised
+    # by toggling is_sing_box_extended via a shell override.
+    local facade_lib="${NETSHIFT_LIB_DIR}/sing_box_config_facade.sh"
+    if [ ! -r "$facade_lib" ]; then
+        fail "sing_box_config_facade.sh not found"
+        return
+    fi
+
+    # The facade hardcodes NETSHIFT_LIB="/usr/lib/netshift" for its own sourcing
+    # of helpers.sh + sing_box_config_manager.sh; bind the bind-mounted sources
+    # to that runtime path so the facade resolves them in the container.
+    mkdir -p /usr/lib/netshift
+    ln -sf "${NETSHIFT_LIB_DIR}/helpers.sh" /usr/lib/netshift/helpers.sh
+    ln -sf "${NETSHIFT_LIB_DIR}/sing_box_config_manager.sh" /usr/lib/netshift/sing_box_config_manager.sh
+
+    local vm_tmp="/tmp/test-vmess-facade-$$.sh"
+    cat > "$vm_tmp" << 'VMEOF'
+# logging.sh is sourced by /usr/bin/netshift in production; the facade itself
+# only sources helpers + manager, so pull it in for log() here.
+. "NETSHIFT_LIB/logging.sh" 2>/dev/null || log() { :; }
+. "FACADE_LIB_PATH"
+
+base_config='{"outbounds":[]}'
+
+# ws + tls synthetic link: base64(JSON). aid=0 must be omitted.
+ws_json='{"v":"2","ps":"node-ws","add":"ws.example.com","port":"443","id":"11111111-2222-3333-4444-555555555555","aid":"0","scy":"auto","net":"ws","host":"ws.example.com","path":"/wspath","tls":"tls","sni":"sni.example.com","alpn":"h2,http/1.1","fp":"chrome"}'
+ws_link="vmess://$(printf '%s' "$ws_json" | base64 | tr -d '\n')"
+
+# plain tcp synthetic link: no transport, no tls.
+tcp_json='{"v":"2","ps":"node-tcp","add":"tcp.example.com","port":"8080","id":"99999999-8888-7777-6666-555555555555","aid":"0","scy":"auto","net":"tcp","host":"","path":"","tls":"","sni":"","alpn":"","fp":""}'
+tcp_link="vmess://$(printf '%s' "$tcp_json" | base64 | tr -d '\n')"
+
+# REGRESSION (S1): a key whose STANDARD base64 body DELIBERATELY contains a '+'.
+# The "node>>" ps label (bytes 0x3E 0x3E) forces a base64 group that maps to
+# '+' (alphabet index 62). If the facade url_decode'd the link before decoding,
+# the '+'->space rewrite would corrupt the body and base64 -d would fail/garble,
+# so this outbound would NOT be generated. Asserting server/uuid here proves the
+# raw-link threading keeps '+' intact.
+plus_json='{"v":"2","ps":"node>>","add":"plus.example.com","port":"2053","id":"abcdef00-1111-2222-3333-444455556666","aid":"0","scy":"auto","net":"tcp","host":"","path":"","tls":"","sni":"","alpn":"","fp":""}'
+plus_link="vmess://$(printf '%s' "$plus_json" | base64 | tr -d '\n')"
+# Sanity: confirm the crafted base64 body actually contains a '+'.
+case "$plus_link" in
+*+*) echo 'vmess-plus-body-has-plus:OK' ;;
+*) echo 'vmess-plus-body-has-plus:FAIL' ;;
+esac
+
+# ── Extended ON: parse path produces a real vmess outbound ──
+is_sing_box_extended() { return 0; }
+
+out_ws=$(sing_box_cf_add_proxy_outbound "$base_config" "vmess_ws" "$ws_link" "0")
+echo "$out_ws" | jq -e '.outbounds[0].type == "vmess"' >/dev/null 2>&1 && echo 'vmess-ws-type:OK' || echo 'vmess-ws-type:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].server == "ws.example.com"' >/dev/null 2>&1 && echo 'vmess-ws-server:OK' || echo 'vmess-ws-server:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].server_port == 443' >/dev/null 2>&1 && echo 'vmess-ws-port:OK' || echo 'vmess-ws-port:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0] | has("alter_id") | not' >/dev/null 2>&1 && echo 'vmess-ws-aid-omitted:OK' || echo 'vmess-ws-aid-omitted:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].transport.type == "ws"' >/dev/null 2>&1 && echo 'vmess-ws-transport:OK' || echo 'vmess-ws-transport:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].transport.path == "/wspath"' >/dev/null 2>&1 && echo 'vmess-ws-path:OK' || echo 'vmess-ws-path:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].transport.headers.Host == "ws.example.com"' >/dev/null 2>&1 && echo 'vmess-ws-host:OK' || echo 'vmess-ws-host:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].tls.enabled == true' >/dev/null 2>&1 && echo 'vmess-ws-tls:OK' || echo 'vmess-ws-tls:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].tls.server_name == "sni.example.com"' >/dev/null 2>&1 && echo 'vmess-ws-sni:OK' || echo 'vmess-ws-sni:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].tls.alpn == ["h2","http/1.1"]' >/dev/null 2>&1 && echo 'vmess-ws-alpn:OK' || echo 'vmess-ws-alpn:FAIL'
+echo "$out_ws" | jq -e '.outbounds[0].tls.utls.fingerprint == "chrome"' >/dev/null 2>&1 && echo 'vmess-ws-fp:OK' || echo 'vmess-ws-fp:FAIL'
+
+out_tcp=$(sing_box_cf_add_proxy_outbound "$base_config" "vmess_tcp" "$tcp_link" "0")
+echo "$out_tcp" | jq -e '.outbounds[0].type == "vmess"' >/dev/null 2>&1 && echo 'vmess-tcp-type:OK' || echo 'vmess-tcp-type:FAIL'
+echo "$out_tcp" | jq -e '.outbounds[0] | has("transport") | not' >/dev/null 2>&1 && echo 'vmess-tcp-no-transport:OK' || echo 'vmess-tcp-no-transport:FAIL'
+echo "$out_tcp" | jq -e '.outbounds[0] | has("tls") | not' >/dev/null 2>&1 && echo 'vmess-tcp-no-tls:OK' || echo 'vmess-tcp-no-tls:FAIL'
+echo "$out_tcp" | jq -e '.outbounds[0].security == "auto"' >/dev/null 2>&1 && echo 'vmess-tcp-security:OK' || echo 'vmess-tcp-security:FAIL'
+
+# ── REGRESSION (S1): '+'-in-base64 link must parse via the RAW link ──
+out_plus=$(sing_box_cf_add_proxy_outbound "$base_config" "vmess_plus" "$plus_link" "0")
+echo "$out_plus" | jq -e '.outbounds[0].type == "vmess"' >/dev/null 2>&1 && echo 'vmess-plus-type:OK' || echo 'vmess-plus-type:FAIL'
+echo "$out_plus" | jq -e '.outbounds[0].server == "plus.example.com"' >/dev/null 2>&1 && echo 'vmess-plus-server:OK' || echo 'vmess-plus-server:FAIL'
+echo "$out_plus" | jq -e '.outbounds[0].server_port == 2053' >/dev/null 2>&1 && echo 'vmess-plus-port:OK' || echo 'vmess-plus-port:FAIL'
+echo "$out_plus" | jq -e '.outbounds[0].uuid == "abcdef00-1111-2222-3333-444455556666"' >/dev/null 2>&1 && echo 'vmess-plus-uuid:OK' || echo 'vmess-plus-uuid:FAIL'
+
+# ── Extended OFF: gate returns config UNCHANGED (no vmess outbound) ──
+is_sing_box_extended() { return 1; }
+out_gate=$(sing_box_cf_add_proxy_outbound "$base_config" "vmess_gate" "$ws_link" "0")
+echo "$out_gate" | jq -e '.outbounds | length == 0' >/dev/null 2>&1 && echo 'vmess-gate-unchanged:OK' || echo 'vmess-gate-unchanged:FAIL'
+
+echo 'DONE'
+VMEOF
+    sed -i "s|FACADE_LIB_PATH|$facade_lib|; s|NETSHIFT_LIB|$NETSHIFT_LIB_DIR|g" "$vm_tmp"
+
+    sh "$vm_tmp" 2>&1 | while IFS= read -r line; do
+        case "$line" in
+            *:OK) pass "$line" ;;
+            *:FAIL) fail "$line" ;;
+            *:SKIP) skip "$line" ;;
+            DONE) ;;
+            *) ;;
+        esac
+    done
+    rm -f "$vm_tmp"
 }
 
 # ─────────────────────────────────────────────────────────────────
@@ -532,6 +630,50 @@ test_config_manager() {
     else
         fail "jq: route rule failed"
     fi
+
+    # ── VMess outbound primitive (sing_box_cm_add_vmess_outbound) ──────────
+    local cm_lib="${NETSHIFT_LIB_DIR}/sing_box_config_manager.sh"
+    if [ ! -r "$cm_lib" ]; then
+        fail "sing_box_config_manager.sh not found"
+        return
+    fi
+
+    local cm_tmp="/tmp/test-cm-vmess-$$.sh"
+    cat > "$cm_tmp" << 'CMEOF'
+. "CM_LIB_PATH"
+
+base_config='{"outbounds":[]}'
+
+# Default security ("auto") + alter_id omitted when "0".
+out=$(sing_box_cm_add_vmess_outbound "$base_config" "vmess-out" "example.com" "443" \
+    "bf000d23-0752-40b4-affe-68f7707a9661" "" "0")
+echo "$out" | jq -e '.outbounds[0].type == "vmess"' >/dev/null 2>&1 && echo 'cm-vmess-type:OK' || echo 'cm-vmess-type:FAIL'
+echo "$out" | jq -e '.outbounds[0].server == "example.com"' >/dev/null 2>&1 && echo 'cm-vmess-server:OK' || echo 'cm-vmess-server:FAIL'
+echo "$out" | jq -e '.outbounds[0].server_port == 443' >/dev/null 2>&1 && echo 'cm-vmess-port:OK' || echo 'cm-vmess-port:FAIL'
+echo "$out" | jq -e '.outbounds[0].uuid == "bf000d23-0752-40b4-affe-68f7707a9661"' >/dev/null 2>&1 && echo 'cm-vmess-uuid:OK' || echo 'cm-vmess-uuid:FAIL'
+echo "$out" | jq -e '.outbounds[0].security == "auto"' >/dev/null 2>&1 && echo 'cm-vmess-security-default:OK' || echo 'cm-vmess-security-default:FAIL'
+echo "$out" | jq -e '.outbounds[0] | has("alter_id") | not' >/dev/null 2>&1 && echo 'cm-vmess-aid-omitted:OK' || echo 'cm-vmess-aid-omitted:FAIL'
+
+# Explicit security + non-zero alter_id present as a number.
+out2=$(sing_box_cm_add_vmess_outbound "$base_config" "vmess-out" "example.com" "443" \
+    "bf000d23-0752-40b4-affe-68f7707a9661" "aes-128-gcm" "64")
+echo "$out2" | jq -e '.outbounds[0].security == "aes-128-gcm"' >/dev/null 2>&1 && echo 'cm-vmess-security-explicit:OK' || echo 'cm-vmess-security-explicit:FAIL'
+echo "$out2" | jq -e '.outbounds[0].alter_id == 64' >/dev/null 2>&1 && echo 'cm-vmess-aid-number:OK' || echo 'cm-vmess-aid-number:FAIL'
+
+echo 'DONE'
+CMEOF
+    sed -i "s|CM_LIB_PATH|$cm_lib|" "$cm_tmp"
+
+    sh "$cm_tmp" 2>&1 | while IFS= read -r line; do
+        case "$line" in
+            *:OK) pass "$line" ;;
+            *:FAIL) fail "$line" ;;
+            *:SKIP) skip "$line" ;;
+            DONE) ;;
+            *) ;;
+        esac
+    done
+    rm -f "$cm_tmp"
 }
 
 # ─────────────────────────────────────────────────────────────────

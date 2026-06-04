@@ -100,6 +100,32 @@ findings; keep under ~200 lines.
   3.11 at `...\Programs\Python\Python311`). Don't `print()` emoji to the
   PowerShell console (cp1251 codepage mangles it / raises); write results to a
   UTF-8 file and read it back.
+## task-005 review-001: vmess base64 + url_decode landmine (proven)
+
+- `sing_box_cf_add_proxy_outbound` runs `url=$(url_decode "$url")` BEFORE the
+  scheme `case`, and `url_decode` does `s/+/ /g`. Any scheme that base64-decodes
+  the WHOLE payload (vmess `vmess://base64(JSON)`; future tuic/etc.) MUST decode
+  from the RAW link, not the url_decode'd one — standard base64's alphabet
+  includes `+`, so `+`→space corrupts ~1-in-64 real keys. Fix pattern: capture
+  `local raw_url="$3"` at the top (before url_decode) and pass `$raw_url` to the
+  whole-payload decoder. Other scheme cases keep using the url_decode'd `$url`.
+- **busybox `tr` does NOT support POSIX char classes** — `tr -d '[:space:]'`
+  deletes the LITERAL chars `[ : s p a c e ]` (silently corrupts base64!). Use
+  explicit bytes: `tr -d ' \011\012\015'` (space/tab/LF/CR octal). Verified
+  in-container: input `aZ:[]cept123` → `Zt123` with `[:space:]`. This was a real
+  regression I introduced and caught via the `sb` smoke run.
+- base64 padding normalization for unpadded links: right-pad payload length to a
+  multiple of 4 with `=` using `pad=$(( ${#p} % 4 ))` then a `while` append loop.
+  POSIX-safe, busybox-safe.
+- To craft a base64 body that DELIBERATELY contains `+`: a `ps`/label value of
+  `node>>` (bytes 0x3E 0x3E) forces a 6-bit group = 62 → `+`. Realistic ASCII
+  host/word values rarely hit it; `>>` is reliable.
+- Probing helpers in-container without fighting PowerShell quoting: write a tiny
+  `.sh` into `netshift/files/usr/lib/` (it's bind-mounted into the smoke
+  container at `/netshift/files`), run via
+  `docker compose ... run --rm --entrypoint sh netshift-test /netshift/files/usr/lib/_tmp.sh`,
+  then delete it. Inline `-c "..."` one-liners get mangled by PowerShell.
+
 - `test_syntax` in `tests/entrypoint.sh` now also `ash -n`'s `usr/bin/netshift`
   and asserts no residual `рџ`/`в”`/`вЂ` markers (built via `printf` octal, since
   busybox grep lacks `\x`). Guards against re-introducing the mojibake.

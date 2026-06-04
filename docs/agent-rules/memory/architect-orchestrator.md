@@ -86,6 +86,38 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   `xray_json_count_unsupported`) and dialerProxy-chained outbounds; dedups on
   the connection part. No-regex jq + busybox-safe sed pre-gate.
 
+## sing-box-extended capability map (researched 2026-06)
+
+- NetShift ALREADY installs sing-box-extended: `updater.sh` pulls
+  `shtorm-7/sing-box-extended`; `is_sing_box_extended` gates features (today only
+  xhttp transport in the facade). So the runtime platform for extended protocols
+  exists; what's missing is config GENERATION (jq cm_*/cf_*), UCI schema, UI.
+- Our facade currently builds only: socks4/4a/5, vless, ss, trojan, hysteria2.
+  Transports: ws, grpc, httpupgrade, xhttp. No endpoint/wireguard support at all
+  (`sing_box_cm_add_*_outbound` has no wireguard/endpoint).
+- Extended (repo `sing-box-extended-extended/option/*.go`) adds many: anytls,
+  tuic, shadowtls, wireguard(+Amnezia/AWG), warp(+Amnezia), masque, mieru,
+  mtproxy, naive, openvpn, ssh, tor, trusttunnel, sudoku, bond, failover, vpn,
+  vmess; transports incl. v2ray kcp/quic, simple-obfs, sip003.
+- Amnezia WG schema (sing-box 1.12 `endpoint` model): an `endpoint` with
+  `"type":"wireguard"`, `private_key`, `address` (listable prefix), `peers[]`
+  (address/port/public_key/pre_shared_key/allowed_ips/persistent_keepalive...),
+  plus nested `"amnezia": { jc,jmin,jmax,s1..s4, h1..h4 (ranges), i1..i5, j1..j3,
+  itime }`. WARP = same WG core + `amnezia` + Cloudflare `profile`/`reserved`.
+- Feasibility tiers for porting to our ash+jq backend:
+  * EASY (pure-JSON outbound, no extra daemon, just a new cm_* + cf_* + URI/UCI
+    parse): tuic, anytls, shadowtls, vmess, naive, hysteria(v1). These mirror the
+    existing vless/trojan/hysteria2 pattern.
+  * MEDIUM: wireguard + Amnezia/AWG and WARP — needs the `endpoints[]` array
+    (new section in config skeleton, route ties to endpoint tag) + key/peer
+    parsing; input format must be decided (awg:// vs wg-conf vs UCI fields).
+  * HARD / likely out of scope: openvpn, mieru, masque, mtproxy(outbound),
+    trusttunnel, sudoku, tor, ssh, bond/failover/vpn groups — bespoke schemas,
+    some need extra config files/daemons; high test surface.
+- Hard dependency for ANY of these: the user must be running the extended build;
+  gate generation behind `is_sing_box_extended` and fail safe (warn + skip) when
+  stock sing-box is installed, exactly like xhttp does today.
+
 ## Workflow facts
 
 - Contribution gating: `CODEOWNERS=@yandexru45`; PRs accepted only after Telegram

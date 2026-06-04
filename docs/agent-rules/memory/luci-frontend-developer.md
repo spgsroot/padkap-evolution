@@ -90,3 +90,34 @@ append findings; keep under ~200 lines.
   don't "fix" without understanding intent.
 - Filename typo `checks/contstants.ts` is imported with the typo everywhere —
   don't "correct" it and break imports.
+
+## Validator-test node globals (task-006)
+
+- `.test.js` files are linted as plain JS (typescript parser, no
+  `languageOptions.globals` in `eslint.config.js`), so bare `Buffer` / `btoa`
+  trips `no-undef` even though vitest runs in the node env at runtime. The
+  validator `.ts` files DON'T hit this (TS lib types cover `atob`). Fix in tests
+  WITHOUT editing eslint config: alias the node global via
+  `const NodeBuffer = globalThis.Buffer;` (`globalThis` is an allowed global) and
+  use `NodeBuffer.from(...).toString('base64')` for fixtures.
+- VMess `vmess://` is base64(JSON) (V2RayN), NOT user@host. `validateVmessUrl`
+  decodes with `atob` (right-pad to %4 with `=` for unpadded tolerance, matching
+  backend), JSON.parse, then narrows `Record<string, unknown>` for
+  `add`/`id`/`port`. It is dispatcher-only (NOT in `validators/index.ts`), exactly
+  like `validateHysteria2Url`. Craft a `+`-containing base64 fixture with a field
+  like `ps:'>>>'` (verified to force `+`).
+
+## Corepack yarn 4.x vs classic lockfile (task-006)
+
+- This repo's `yarn.lock` is v1 (classic) but corepack may activate yarn 4.16.0.
+  Running `yarn install` migrates the lockfile + creates `.yarn/`/`.yarnrc.yml`.
+  AVOID `yarn install`; node_modules is committed/present. Run CI steps via local
+  bins: `node_modules/.bin/{prettier --write src, eslint src --ext .ts,.tsx
+  --max-warnings=0, vitest run, tsup src/main.ts}`. Run locales via
+  `node {extract-calls,generate-pot,generate-po ru,distribute-locales}.js`.
+  Before reporting: confirm `git diff --exit-code -- fe-app-netshift/yarn.lock`
+  and no `.yarn`/`.yarnrc.yml`.
+- `locales/calls.json` is committed WITH Windows backslash paths
+  (`src\\validators\\...`) — generating it on Windows does NOT churn separators.
+- The proxy-link help string `"vless://, ... links"` is duplicated 3× in
+  `section.js` (proxy_string + selector + urltest fields) — use edit replaceAll.

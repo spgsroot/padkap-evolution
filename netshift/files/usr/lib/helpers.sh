@@ -221,6 +221,42 @@ base64_decode() {
     echo "$decoded_url"
 }
 
+# Decodes a vmess:// share link (V2RayN base64(JSON) form) into its JSON object.
+# Strips the vmess:// scheme prefix, base64-decodes the remainder, and echoes the
+# decoded text (expected to be a JSON object; the caller validates with jq -e).
+# Returns empty output when the input is not a base64(JSON) VMess link.
+#
+# IMPORTANT: this decodes the WHOLE payload as STANDARD base64 (alphabet
+# includes '+'), so the caller MUST pass the RAW pre-url_decode link — passing a
+# url_decode'd link rewrites '+'->space and corrupts the body.
+# Arguments:
+#   $1 - the vmess:// link (raw, pre-url_decode)
+vmess_link_to_json() {
+    local url="$1"
+    local payload decoded pad_len
+
+    payload="${url#vmess://}"
+    [ -n "$payload" ] || return 0
+
+    # Normalize: strip whitespace (space, tab, CR, LF via octal escapes — busybox
+    # `tr` does NOT understand the POSIX `[:space:]` class and would instead
+    # delete those literal characters, corrupting the base64), then right-pad to
+    # a multiple of 4 with '=' so BusyBox `base64 -d` (which can reject missing
+    # padding) accepts real-world unpadded links.
+    payload="$(printf '%s' "$payload" | tr -d ' \011\012\015')"
+    pad_len=$(( ${#payload} % 4 ))
+    if [ "$pad_len" -ne 0 ]; then
+        pad_len=$(( 4 - pad_len ))
+        while [ "$pad_len" -gt 0 ]; do
+            payload="${payload}="
+            pad_len=$(( pad_len - 1 ))
+        done
+    fi
+
+    decoded="$(base64_decode "$payload")"
+    echo "$decoded"
+}
+
 # Generates a unique 16-character ID based on the current timestamp and a random number
 gen_id() {
     { date +%s; head -c 16 /dev/urandom; } | md5sum | cut -c1-16

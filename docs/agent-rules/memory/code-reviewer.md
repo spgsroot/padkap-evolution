@@ -54,3 +54,7 @@ append recurring findings; keep under ~200 lines.
   decode HEAD blob vs working tree, strip `[^\x00-\x7F]` per line, expect 0
   mismatched lines); beware PowerShell text pipelines which produce false UTF-16
   diffs.
+
+- base64 share-link decode vs `sing_box_cf_add_proxy_outbound` `url_decode` (facade:65): the facade runs `url_decode` (+>space, %XX>byte) on the whole URL before the scheme case. Any case that base64-decodes the ENTIRE payload (vmess, future tuic/etc.) must use the RAW pre-url_decode link — standard base64 contains '+'. The ss) case escapes this only because it decodes a short method:password userinfo. Beware synthetic test keys that avoid '+' masking this (false green).
+
+- For protocol validators that base64-decode a whole body (vmess, future tuic/etc.): the '+'-regression is real only if the dispatcher preserves '+'. validateProxyUrl only .trim()s, so '+' survives at the boundary — a green direct-call '+' test is sufficient evidence; a dispatcher-level '+' assertion is the stronger guard.

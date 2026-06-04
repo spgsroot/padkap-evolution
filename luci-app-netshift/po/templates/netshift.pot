@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: NETSHIFT\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-04 16:41+0300\n"
-"PO-Revision-Date: 2026-06-04 16:41+0300\n"
+"POT-Creation-Date: 2026-06-04 19:59+0300\n"
+"PO-Revision-Date: 2026-06-04 19:59+0300\n"
 "Last-Translator: yandexru45 <sukadark228@gmail.com>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "Language: \n"
@@ -619,6 +619,35 @@ msgstr ""
 msgid "Invalid VLESS URL: parsing failed"
 msgstr ""
 
+#: src\validators\validateVmessUrl.ts:73
+msgid "Invalid VMess URL: invalid port"
+msgstr ""
+
+#: src\validators\validateVmessUrl.ts:31
+msgid "Invalid VMess URL: malformed base64"
+msgstr ""
+
+#: src\validators\validateVmessUrl.ts:41
+#: src\validators\validateVmessUrl.ts:48
+msgid "Invalid VMess URL: malformed JSON"
+msgstr ""
+
+#: src\validators\validateVmessUrl.ts:57
+msgid "Invalid VMess URL: missing address"
+msgstr ""
+
+#: src\validators\validateVmessUrl.ts:64
+msgid "Invalid VMess URL: missing id"
+msgstr ""
+
+#: src\validators\validateVmessUrl.ts:14
+msgid "Invalid VMess URL: must not contain spaces"
+msgstr ""
+
+#: src\validators\validateVmessUrl.ts:7
+msgid "Invalid VMess URL: must start with vmess://"
+msgstr ""
+
 #: src\validators\validateSubnet.ts:18
 msgid "IP address 0.0.0.0 is not allowed"
 msgstr ""
@@ -1093,8 +1122,8 @@ msgstr ""
 msgid "Uplink"
 msgstr ""
 
-#: src\validators\validateProxyUrl.ts:37
-msgid "URL must start with vless://, ss://, trojan://, socks4/5://, or hysteria2://hy2://"
+#: src\validators\validateProxyUrl.ts:42
+msgid "URL must start with vless://, vmess://, ss://, trojan://, socks4/5://, or hysteria2://hy2://"
 msgstr ""
 
 #: src\validators\validateUrl.ts:17
@@ -1159,6 +1188,7 @@ msgstr ""
 #: src\validators\validateTrojanUrl.ts:59
 #: src\validators\validateUrl.ts:28
 #: src\validators\validateVlessUrl.ts:108
+#: src\validators\validateVmessUrl.ts:77
 msgid "Valid"
 msgstr ""
 
@@ -1179,7 +1209,7 @@ msgstr ""
 #: ..\luci-app-netshift\htdocs\luci-static\resources\view\netshift\section.js:38
 #: ..\luci-app-netshift\htdocs\luci-static\resources\view\netshift\section.js:156
 #: ..\luci-app-netshift\htdocs\luci-static\resources\view\netshift\section.js:179
-msgid "vless://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links"
+msgid "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links"
 msgstr ""
 
 #: ..\luci-app-netshift\htdocs\luci-static\resources\view\netshift\section.js:405

@@ -1035,6 +1035,56 @@
     ]
   },
   {
+    "call": "Invalid VMess URL: invalid port",
+    "key": "Invalid VMess URL: invalid port",
+    "places": [
+      "src\\validators\\validateVmessUrl.ts:73"
+    ]
+  },
+  {
+    "call": "Invalid VMess URL: malformed base64",
+    "key": "Invalid VMess URL: malformed base64",
+    "places": [
+      "src\\validators\\validateVmessUrl.ts:31"
+    ]
+  },
+  {
+    "call": "Invalid VMess URL: malformed JSON",
+    "key": "Invalid VMess URL: malformed JSON",
+    "places": [
+      "src\\validators\\validateVmessUrl.ts:41",
+      "src\\validators\\validateVmessUrl.ts:48"
+    ]
+  },
+  {
+    "call": "Invalid VMess URL: missing address",
+    "key": "Invalid VMess URL: missing address",
+    "places": [
+      "src\\validators\\validateVmessUrl.ts:57"
+    ]
+  },
+  {
+    "call": "Invalid VMess URL: missing id",
+    "key": "Invalid VMess URL: missing id",
+    "places": [
+      "src\\validators\\validateVmessUrl.ts:64"
+    ]
+  },
+  {
+    "call": "Invalid VMess URL: must not contain spaces",
+    "key": "Invalid VMess URL: must not contain spaces",
+    "places": [
+      "src\\validators\\validateVmessUrl.ts:14"
+    ]
+  },
+  {
+    "call": "Invalid VMess URL: must start with vmess://",
+    "key": "Invalid VMess URL: must start with vmess://",
+    "places": [
+      "src\\validators\\validateVmessUrl.ts:7"
+    ]
+  },
+  {
     "call": "IP address 0.0.0.0 is not allowed",
     "key": "IP address 0.0.0.0 is not allowed",
     "places": [
@@ -1848,10 +1898,10 @@
     ]
   },
   {
-    "call": "URL must start with vless://, ss://, trojan://, socks4/5://, or hysteria2://hy2://",
-    "key": "URL must start with vless://, ss://, trojan://, socks4/5://, or hysteria2://hy2://",
+    "call": "URL must start with vless://, vmess://, ss://, trojan://, socks4/5://, or hysteria2://hy2://",
+    "key": "URL must start with vless://, vmess://, ss://, trojan://, socks4/5://, or hysteria2://hy2://",
     "places": [
-      "src\\validators\\validateProxyUrl.ts:37"
+      "src\\validators\\validateProxyUrl.ts:42"
     ]
   },
   {
@@ -1955,7 +2005,8 @@
       "src\\validators\\validateSubnet.ts:38",
       "src\\validators\\validateTrojanUrl.ts:59",
       "src\\validators\\validateUrl.ts:28",
-      "src\\validators\\validateVlessUrl.ts:108"
+      "src\\validators\\validateVlessUrl.ts:108",
+      "src\\validators\\validateVmessUrl.ts:77"
     ]
   },
   {
@@ -1982,8 +2033,8 @@
     ]
   },
   {
-    "call": "vless://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links",
-    "key": "vless://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links",
+    "call": "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links",
+    "key": "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links",
     "places": [
       "..\\luci-app-netshift\\htdocs\\luci-static\\resources\\view\\netshift\\section.js:38",
       "..\\luci-app-netshift\\htdocs\\luci-static\\resources\\view\\netshift\\section.js:156",

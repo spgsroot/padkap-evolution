@@ -539,6 +539,69 @@ function validateHysteria2Url(url) {
   }
 }
 
+// src/validators/validateVmessUrl.ts
+function validateVmessUrl(url) {
+  if (!url.startsWith("vmess://")) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: must start with vmess://")
+    };
+  }
+  if (/\s/.test(url)) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: must not contain spaces")
+    };
+  }
+  const body = url.slice("vmess://".length);
+  const padded = body + "=".repeat((4 - body.length % 4) % 4);
+  let decoded;
+  try {
+    decoded = atob(padded);
+  } catch (_e) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: malformed base64")
+    };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(decoded);
+  } catch (_e) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: malformed JSON")
+    };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: malformed JSON")
+    };
+  }
+  const config = parsed;
+  if (typeof config.add !== "string" || config.add.length === 0) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: missing address")
+    };
+  }
+  if (typeof config.id !== "string" || config.id.length === 0) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: missing id")
+    };
+  }
+  const portNum = Number(config.port);
+  if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+    return {
+      valid: false,
+      message: _("Invalid VMess URL: invalid port")
+    };
+  }
+  return { valid: true, message: _("Valid") };
+}
+
 // src/validators/validateProxyUrl.ts
 function validateProxyUrl(url) {
   const trimmedUrl = url.trim();
@@ -551,6 +614,9 @@ function validateProxyUrl(url) {
   if (trimmedUrl.startsWith("trojan://")) {
     return validateTrojanUrl(trimmedUrl);
   }
+  if (trimmedUrl.startsWith("vmess://")) {
+    return validateVmessUrl(trimmedUrl);
+  }
   if (/^socks(4|4a|5):\/\//.test(trimmedUrl)) {
     return validateSocksUrl(trimmedUrl);
   }
@@ -560,7 +626,7 @@ function validateProxyUrl(url) {
   return {
     valid: false,
     message: _(
-      "URL must start with vless://, ss://, trojan://, socks4/5://, or hysteria2://hy2://"
+      "URL must start with vless://, vmess://, ss://, trojan://, socks4/5://, or hysteria2://hy2://"
     )
   };
 }
