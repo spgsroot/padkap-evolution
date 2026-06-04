@@ -63,6 +63,28 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
 - Frontend `runFakeIPCheck` has inverted-looking allGood/atLeastOneGood logic.
 - Diagnostic strings contain intentional CP1251 mojibake (emoji/box-drawing) —
   preserve byte sequences when editing.
+- `validate_subscription_file` (helpers.sh) only checks `.type` is NOT in
+  {selector,urltest,direct,dns,block}. A body whose outbounds lack `.type`
+  entirely (e.g. a single Xray-config OBJECT using `.protocol`) passes as
+  "valid" → bypasses the fallback normalizer and later fails `sing-box check`.
+  An Xray ARRAY is `type=="array"` and correctly falls through to normalize.
+  Watch this when adding any pre-normalize validate gate.
+
+## Subscription pipeline facts (verified 2026-06)
+
+- Fallback chain in `download_subscription_into_cache` (usr/bin/netshift):
+  validate raw body FIRST, only then `normalize_subscription_to_singbox`
+  (base64 / plaintext URI list / Xray-JSON). UA fallback wraps the whole loop:
+  it probes `SUBSCRIPTION_USER_AGENT_CANDIDATES` (constants.sh) when no UA is
+  configured, caches the winner in `<section>.user_agent` (atomic .tmp.$$+mv).
+- New per-section UCI option `subscription_user_agent` is read but NOT yet in
+  the UCI schema / LuCI / ACL. Degrades gracefully (empty ⇒ auto). Treat any
+  promotion to a real UI knob as a system-level change (schema + LuCI + i18n).
+- `xray_json_to_uri_lines` converts Xray client configs (object|array) to share
+  URIs; emits ONLY keys the facade reads (type/path/host/mode/serviceName/
+  security/sni/alpn/fp/pbk/sid/flow); drops vmess (counted by
+  `xray_json_count_unsupported`) and dialerProxy-chained outbounds; dedups on
+  the connection part. No-regex jq + busybox-safe sed pre-gate.
 
 ## Workflow facts
 

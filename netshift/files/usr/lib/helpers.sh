@@ -660,13 +660,71 @@ generate_hwid() {
         "$(echo "$raw_hash" | cut -c13-16)"
 }
 
-# Downloads a subscription JSON from the given URL with custom headers
+# Resolves the effective subscription User-Agent: the explicit value when one
+# is given, otherwise the default "singbox/<version>" string. Centralizes the
+# default so download_subscription and the candidate builder agree.
+get_subscription_user_agent() {
+    local custom_user_agent="${1:-}"
+
+    if [ -n "$custom_user_agent" ]; then
+        printf '%s' "$custom_user_agent"
+        return 0
+    fi
+
+    printf 'singbox/%s' "$(get_sing_box_version)"
+}
+
+# Emits the ordered, de-duplicated list of User-Agent candidates (one per line)
+# to try for a subscription source when no User-Agent is explicitly configured.
+# Different panels key the returned body format off the User-Agent, so we probe
+# a whitelist of well-known clients and let the caller keep the first that
+# yields valid outbounds.
+#
+# Arguments:
+#   $1 - configured User-Agent (empty for auto mode)
+#   $2 - preferred User-Agent (e.g. the previously cached winner; tried early)
+# Behavior:
+#   - configured non-empty: emit ONLY that value (respect the user's choice).
+#   - auto: emit "singbox/<ver>", then the preferred one, then the whitelist
+#     from constants (SUBSCRIPTION_USER_AGENT_CANDIDATES), skipping duplicates.
+build_subscription_user_agent_candidates() {
+    local configured_user_agent="${1:-}"
+    local preferred_user_agent="${2:-}"
+    local default_user_agent candidate seen
+
+    if [ -n "$configured_user_agent" ]; then
+        printf '%s\n' "$configured_user_agent"
+        return 0
+    fi
+
+    default_user_agent="$(get_subscription_user_agent)"
+    seen=""
+    # shellcheck disable=SC2086 # word-splitting of the candidate list is intentional
+    for candidate in "$default_user_agent" "$preferred_user_agent" $SUBSCRIPTION_USER_AGENT_CANDIDATES; do
+        [ -n "$candidate" ] || continue
+        # Skip a candidate already emitted. Wrap stored names in newlines so the
+        # substring test matches whole entries only.
+        case "$seen" in
+        *"
+$candidate
+"*) continue ;;
+        esac
+        seen="${seen}
+$candidate
+"
+        printf '%s\n' "$candidate"
+    done
+}
+
+# Downloads a subscription body from the given URL with client-mimicking headers
 # Arguments:
 #   $1 - subscription URL
 #   $2 - output file path
 #   $3 - http proxy address (optional)
 #   $4 - retries (optional, default 3)
 #   $5 - wait between retries (optional, default 2)
+#   $6 - timeout seconds (optional, default 10)
+#   $7 - User-Agent (optional; default "singbox/<version>")
 download_subscription() {
     local url="$1"
     local filepath="$2"
@@ -674,12 +732,14 @@ download_subscription() {
     local retries="${4:-3}"
     local wait="${5:-2}"
     local timeout="${6:-10}"
+    local user_agent="${7:-}"
 
     local sb_version device_model kernel_version hwid
     sb_version="$(get_sing_box_version)"
     device_model="$(get_device_model)"
     kernel_version="$(get_kernel_version)"
     hwid="$(generate_hwid)"
+    [ -n "$user_agent" ] || user_agent="$(get_subscription_user_agent)"
 
     local tmpfile errfile rc family
     tmpfile="${filepath}.part.$$"
@@ -693,7 +753,7 @@ download_subscription() {
             if [ -n "$http_proxy_address" ]; then
                 http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
                     wget -4 -T "$timeout" -O "$tmpfile" \
-                        --header "User-Agent: singbox/$sb_version" \
+                        --header "User-Agent: $user_agent" \
                         --header "X-HWID: $hwid" \
                         --header "X-Device-OS: OpenWrt Linux" \
                         --header "X-Device-Model: $device_model" \
@@ -703,7 +763,7 @@ download_subscription() {
                         "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$tmpfile" \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -716,7 +776,7 @@ download_subscription() {
             if [ -n "$http_proxy_address" ]; then
                 http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
                     wget -T "$timeout" -O "$tmpfile" \
-                        --header "User-Agent: singbox/$sb_version" \
+                        --header "User-Agent: $user_agent" \
                         --header "X-HWID: $hwid" \
                         --header "X-Device-OS: OpenWrt Linux" \
                         --header "X-Device-Model: $device_model" \
@@ -726,7 +786,7 @@ download_subscription() {
                         "$url" 2>"$errfile"
             else
                 wget -T "$timeout" -O "$tmpfile" \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -761,7 +821,7 @@ download_subscription() {
             if [ -n "$http_proxy_address" ]; then
                 http_proxy="http://$http_proxy_address" https_proxy="http://$http_proxy_address" \
                     wget -4 -T "$timeout" -O "$tmpfile" \
-                        --header "User-Agent: singbox/$sb_version" \
+                        --header "User-Agent: $user_agent" \
                         --header "X-HWID: $hwid" \
                         --header "X-Device-OS: OpenWrt Linux" \
                         --header "X-Device-Model: $device_model" \
@@ -771,7 +831,7 @@ download_subscription() {
                         "$url" 2>"$errfile"
             else
                 wget -4 -T "$timeout" -O "$tmpfile" \
-                    --header "User-Agent: singbox/$sb_version" \
+                    --header "User-Agent: $user_agent" \
                     --header "X-HWID: $hwid" \
                     --header "X-Device-OS: OpenWrt Linux" \
                     --header "X-Device-Model: $device_model" \
@@ -972,14 +1032,197 @@ describe_subscription_validation_failure() {
     echo "subscription contains no usable proxy outbounds: total=${total:-unknown}, usable=${usable:-unknown}"
 }
 
+# Convert an "Xray JSON" subscription body into a newline-separated list of
+# proxy share URIs (one per line) that the fallback parser's URI loop can
+# consume.
+#
+# An "Xray JSON" body is what several panels (e.g. the Xray/v2rayN ecosystem)
+# hand out instead of a sing-box config: either a single Xray client config
+# object or, more commonly, a JSON ARRAY of such objects. Each object carries
+# an `outbounds` array whose proxy members use the Xray schema
+# (`protocol` + `settings.vnext`/`settings.servers` + `streamSettings`), which
+# is NOT the sing-box outbound schema. validate_subscription_file() rejects it
+# (its outbounds have no sing-box `type`), so without this converter the whole
+# subscription is unusable.
+#
+# Strategy: for every config object we emit one `vless://` / `trojan://` /
+# `ss://` share URI per *directly usable* proxy outbound, i.e. one that does
+# NOT declare `streamSettings.sockopt.dialerProxy` (a chained / multi-hop
+# upstream that cannot be expressed as a single share link). The resulting URIs
+# carry the standard query params the facade already understands
+# (security/sni/fp/pbk/sid/flow/type/path/host/mode/alpn), so they flow through
+# the existing sing_box_cf_add_proxy_outbound path unchanged. The outbound tag
+# (or the config `remarks`) becomes the URI fragment so the node keeps a
+# human-readable name.
+#
+# CRITICAL: OpenWRT's jq has no Oniguruma, so the program below uses only
+# explicit string operations (no test/match/sub/gsub). It also keeps every
+# query VALUE free of '& ? # %' and whitespace, because url_get_query_param()
+# (helpers.sh) stops a value at the first such delimiter.
+#
+# Arguments:
+#   src_file: path to the raw downloaded subscription body
+# Returns:
+#   0 and prints the URI lines to stdout when at least one outbound converted;
+#   1 (and prints nothing) otherwise.
+xray_json_to_uri_lines() {
+    local src_file="$1"
+
+    [ -s "$src_file" ] || return 1
+
+    # Quick structural gate before invoking jq: the body must be valid JSON
+    # whose (array element | object) carries Xray-style proxy outbounds. We let
+    # jq make the authoritative decision and emit the URIs in one pass.
+    jq -er '
+        # Normalize the document to an array of Xray config objects.
+        (if type == "array" then . else [.] end) as $configs
+
+        # A query value is only safe for url_get_query_param when it is present
+        # (not JSON null) and carries none of these delimiters/whitespace;
+        # otherwise drop the param entirely. NB: a missing Xray field reads as
+        # JSON null, and (null | tostring) == "null" — we must treat that as
+        # absent, never emit a literal "null" value (e.g. sid=null).
+        | def safe($v):
+            if $v == null then ""
+            else
+              ($v | tostring) as $s
+              | if ($s == "") then ""
+                elif ($s | (index("&") // index("?") // index("#")
+                            // index(" ") // index("%")
+                            // index("\t") // index("\n"))) != null then ""
+                else $s end
+            end;
+
+        # Build "key=value" only when value is present and delimiter-safe.
+        def kv($k; $v):
+            safe($v) as $s
+            | if $s == "" then empty else ($k + "=" + $s) end;
+
+        [ $configs[]
+          | (.remarks // "") as $cfg_name
+          | (.outbounds // [])[]
+          | select(type == "object")
+          | select(.protocol == "vless" or .protocol == "trojan"
+                   or .protocol == "shadowsocks")
+          # Skip chained / multi-hop outbounds: not representable as one URI.
+          | select((.streamSettings.sockopt.dialerProxy // "") == "")
+          | . as $ob
+          | (.streamSettings // {}) as $ss
+          | ($ss.network // "tcp") as $net
+          | ($ss.security // "") as $sec
+          | ($ss.realitySettings // {}) as $reality
+          | ($ss.tlsSettings // $ss.realitySettings // {}) as $tls
+          # vnext (vless/vmess) vs servers (trojan/shadowsocks) addressing.
+          | ($ob.settings.vnext[0] // $ob.settings.servers[0] // {}) as $peer
+          | ($peer.users[0] // {}) as $user
+          | ($peer.address // "") as $host
+          | ($peer.port // "") as $port
+          | select($host != "" and ($port | tostring) != "")
+          | ($ob.tag // $cfg_name) as $name
+          # Build the query param list per protocol, dropping empties.
+          | (
+              if $ob.protocol == "vless" then
+                ([ "encryption=none",
+                   ("type=" + $net),
+                   kv("flow"; $user.flow),
+                   (if $sec != "" then ("security=" + $sec) else empty end),
+                   kv("sni"; ($tls.serverName // "")) ])
+                + (if $sec == "reality" then
+                     [ kv("pbk"; $reality.publicKey),
+                       kv("sid"; $reality.shortId),
+                       kv("fp"; ($reality.fingerprint // "chrome")) ]
+                   else
+                     [ kv("fp"; ($tls.fingerprint // "")) ]
+                   end)
+              elif $ob.protocol == "trojan" then
+                [ ("type=" + $net),
+                  (if $sec != "" then ("security=" + ($sec)) else "security=tls" end),
+                  kv("sni"; ($tls.serverName // "")),
+                  kv("fp"; ($tls.fingerprint // "")) ]
+              else
+                [ ("type=" + $net) ]
+              end
+            ) as $base
+          # Transport-specific params (ws / xhttp / grpc).
+          | (
+              if $net == "ws" then
+                [ kv("path"; ($ss.wsSettings.path // "")),
+                  kv("host"; ($ss.wsSettings.headers.Host // "")) ]
+              elif $net == "xhttp" then
+                [ kv("path"; ($ss.xhttpSettings.path // "")),
+                  kv("host"; ($ss.xhttpSettings.host // "")),
+                  kv("mode"; ($ss.xhttpSettings.mode // "")) ]
+              elif $net == "grpc" then
+                [ kv("serviceName"; ($ss.grpcSettings.serviceName // "")) ]
+              else [] end
+            ) as $transport
+          # alpn is a JSON array in Xray; flatten to a comma string (no spaces).
+          | ([ ($tls.alpn // [])[] | tostring ] | join(",")) as $alpn_str
+          | ($base + $transport
+             + (if $alpn_str != "" then [ kv("alpn"; $alpn_str) ] else [] end)
+             | map(select(. != null and . != ""))) as $query
+          # Credential: uuid for vless, password for trojan/shadowsocks.
+          | (if $ob.protocol == "vless" then ($user.id // "")
+             else ($peer.password // $ob.settings.password // "") end) as $cred
+          | select($cred != "")
+          | ($ob.protocol
+             | if . == "shadowsocks" then "ss" else . end) as $scheme
+          # The connection part (no #fragment) is the dedup key: providers that
+          # ship one server set across many "profiles" repeat identical nodes
+          # with only the display name differing, which would otherwise inflate
+          # the list into thousands of duplicates.
+          | ($scheme + "://" + $cred + "@" + $host + ":" + ($port | tostring)
+             + (if ($query | length) > 0 then "?" + ($query | join("&")) else "" end)
+            ) as $conn
+          | { conn: $conn,
+              uri: ($conn + (if $name != "" then "#" + $name else "" end)) }
+        ]
+        # Deduplicate on $conn, preserving first-seen order (no sort): a
+        # label/break reduce over already-seen keys. Avoids unique_by (which
+        # reorders) and stays within the no-regex jq subset on OpenWRT.
+        | reduce .[] as $e ({ seen: [], out: [] };
+            if (.seen | index($e.conn)) != null then .
+            else .seen += [$e.conn] | .out += [$e.uri] end)
+        | .out
+        | select(length > 0)
+        | .[]
+    ' "$src_file" 2>/dev/null
+}
+
+# Count the Xray-JSON proxy outbounds that look like real nodes but use a
+# protocol the NetShift facade cannot build (today: vmess — the facade has no
+# vmess outbound). These are silently dropped by xray_json_to_uri_lines, so we
+# count them separately to surface an explicit warning to the user instead of
+# leaving them to wonder why a node count came up short. Chained (dialerProxy)
+# outbounds are NOT counted here — those are deliberately collapsed, not
+# "unsupported". Prints a single integer (0 when none / on any error).
+xray_json_count_unsupported() {
+    local src_file="$1"
+
+    [ -s "$src_file" ] || {
+        echo 0
+        return 0
+    }
+
+    jq -er '
+        [ (if type == "array" then . else [.] end)[]
+          | (.outbounds // [])[]
+          | select(type == "object")
+          | select((.streamSettings.sockopt.dialerProxy // "") == "")
+          | select(.protocol == "vmess")
+        ] | length
+    ' "$src_file" 2>/dev/null || echo 0
+}
+
 # Fallback subscription parser.
 #
 # Many providers do not return a sing-box JSON config. Instead they return
 # either (a) a base64-encoded list of proxy URIs, or (b) a plaintext list of
 # proxy URIs (one per line), possibly interspersed with '#comment' metadata
-# lines. This function decodes/parses such a body into a minimal sing-box
-# configuration ({"outbounds":[...]}) so the normal persist + merge path can
-# consume it unchanged.
+# lines, or (c) an "Xray JSON" config (object or array of objects, handled via
+# xray_json_to_uri_lines above). This function decodes/parses such a body into
+# a minimal sing-box configuration ({"outbounds":[...]}) so the normal persist
+# + merge path can consume it unchanged.
 #
 # It lives in helpers.sh (alongside validate_subscription_file). It calls
 # sing_box_cf_add_proxy_outbound, which is defined later in
@@ -1002,7 +1245,7 @@ normalize_subscription_to_singbox() {
     local raw stripped candidate pad_len decoded bom
     local udp_over_tcp config new_config lines_file
     local line scheme idx kept skipped before_count after_count final_count
-    local fragment display_name
+    local fragment display_name first_char xray_uris xray_unsupported
 
     [ -s "$src_file" ] || return 1
     # Strip a leading UTF-8 BOM (EF BB BF) if present; it would otherwise break
@@ -1012,6 +1255,32 @@ normalize_subscription_to_singbox() {
     raw="$(sed "1s/^${bom}//" "$src_file" 2>/dev/null)"
     [ -n "$raw" ] || raw="$(cat "$src_file" 2>/dev/null)"
     [ -n "$raw" ] || return 1
+
+    # Xray-JSON detection (before base64/URI handling). When the body is a JSON
+    # object/array of Xray client configs, convert its proxy outbounds to share
+    # URIs and feed those through the URI loop below. Only attempt this when the
+    # first non-whitespace byte is '{' or '[' (cheap pre-gate) so plaintext URI
+    # lists never pay the jq cost.
+    first_char="$(printf '%s' "$raw" | sed -n '1{s/^[[:space:]]*//;s/\(.\).*/\1/p;};1q' 2>/dev/null)"
+    case "$first_char" in
+    '{' | '[')
+        xray_uris="$(xray_json_to_uri_lines "$src_file" 2>/dev/null)"
+        if [ -n "$xray_uris" ]; then
+            log "Detected Xray JSON subscription for '$section'; converting proxy outbounds to share URIs" "debug"
+            raw="$xray_uris"
+            # Surface unsupported protocols (vmess) explicitly: they are dropped
+            # by the converter because the facade cannot build them, and a silent
+            # drop looks like a bug to the user.
+            xray_unsupported="$(xray_json_count_unsupported "$src_file")"
+            case "$xray_unsupported" in
+            '' | *[!0-9]*) xray_unsupported=0 ;;
+            esac
+            if [ "$xray_unsupported" -gt 0 ]; then
+                log "Xray JSON subscription for '$section' has $xray_unsupported VMess node(s); VMess is not supported and they were skipped" "warn"
+            fi
+        fi
+        ;;
+    esac
 
     # Decide whether the body is a base64 blob or already plaintext URIs.
     # Be conservative: only treat as base64 when the raw body has NO '://'

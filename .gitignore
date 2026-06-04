@@ -4,3 +4,4 @@ fe-app-netshift/.env
 .DS_Store
 *.txt
 tests/test-results/
+docs/tasks

@@ -746,6 +746,303 @@ else
 fi
 rm -f "$caseD_in" "$caseD_out"
 
+# ── CASE E: Xray JSON subscription (array of Xray client configs) ───
+# A provider that returns an "Xray JSON" body instead of a sing-box config:
+# an array of Xray configs whose proxy outbounds use the Xray schema
+# (protocol + settings.vnext + streamSettings). The normalizer must detect
+# this, convert the directly-usable (non-dialerProxy) outbounds to share URIs
+# and produce a valid sing-box config. The chained (sockopt.dialerProxy)
+# outbound must be skipped.
+caseE_in="/tmp/netshift-fb-caseE-$$.json"
+caseE_out="/tmp/netshift-fb-caseE-out-$$.json"
+cat > "$caseE_in" << 'XRAYJSON'
+[
+  {
+    "remarks": "Reality TCP",
+    "outbounds": [
+      {
+        "protocol": "vless",
+        "tag": "proxy-reality",
+        "settings": {"vnext": [{"address": "uk.example.com", "port": 8443,
+          "users": [{"id": "59e308c0-071d-4214-bb4a-64a2409d9e3b",
+            "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+        "streamSettings": {"network": "tcp", "security": "reality",
+          "realitySettings": {"publicKey": "dY9SNEllJMW63xo-JdXufhmjAxB",
+            "shortId": "c20b1035d72d7793", "serverName": "storage.yandex.net",
+            "fingerprint": "firefox"}}
+      }
+    ]
+  },
+  {
+    "remarks": "WS TLS",
+    "outbounds": [
+      {
+        "protocol": "vless",
+        "tag": "proxy-ws",
+        "settings": {"vnext": [{"address": "ws.example.com", "port": 443,
+          "users": [{"id": "dea6c6da-3903-4dbc-b98c-e79364764f9f",
+            "flow": "", "encryption": "none"}]}]},
+        "streamSettings": {"network": "ws", "security": "tls",
+          "tlsSettings": {"serverName": "ws.example.com"},
+          "wsSettings": {"path": "/livestreamcontent/",
+            "headers": {"Host": "ws.example.com"}}}
+      },
+      {
+        "protocol": "vless",
+        "tag": "proxy-chained",
+        "settings": {"vnext": [{"address": "bypass.example.com", "port": 8443,
+          "users": [{"id": "8c459cd3-f3b0-496c-9d87-138d292ecdf6",
+            "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+        "streamSettings": {"network": "tcp", "security": "reality",
+          "sockopt": {"dialerProxy": "upstream-0"},
+          "realitySettings": {"publicKey": "abc", "shortId": "def",
+            "serverName": "storage.yandex.net", "fingerprint": "firefox"}}
+      }
+    ]
+  }
+]
+XRAYJSON
+
+if normalize_subscription_to_singbox "$caseE_in" "$caseE_out" "testsub"; then
+    echo 'fb-caseE-rc:OK'
+else
+    echo 'fb-caseE-rc:FAIL'
+fi
+# Exactly two usable outbounds: reality-tcp + ws-tls; the dialerProxy one skipped.
+e_len="$(jq -r '.outbounds | length' "$caseE_out" 2>/dev/null)"
+[ -n "$e_len" ] || e_len=0
+if [ "$e_len" -eq 2 ]; then
+    echo "fb-caseE-count(==2 got $e_len):OK"
+else
+    echo "fb-caseE-count(==2 got $e_len):FAIL"
+fi
+if validate_subscription_file "$caseE_out"; then
+    echo 'fb-caseE-validate:OK'
+else
+    echo 'fb-caseE-validate:FAIL'
+fi
+# The reality outbound must carry the converted reality block + flow.
+if jq -e '[.outbounds[] | select(.type == "vless"
+        and .tls.reality.public_key == "dY9SNEllJMW63xo-JdXufhmjAxB"
+        and .flow == "xtls-rprx-vision")] | length == 1' "$caseE_out" \
+        > /dev/null 2>&1; then
+    echo 'fb-caseE-reality-fields:OK'
+else
+    echo 'fb-caseE-reality-fields:FAIL'
+fi
+rm -f "$caseE_in" "$caseE_out"
+
+# ── CASE F: Xray JSON reality node WITHOUT shortId ──────────────────
+# Regression guard: a missing Xray field reads as JSON null, and a naive
+# (null | tostring) would emit a literal "sid=null" query param, which
+# sing-box would then store as short_id:"null". The converter must drop the
+# absent param entirely, so the produced reality block carries NO short_id.
+caseF_in="/tmp/netshift-fb-caseF-$$.json"
+caseF_out="/tmp/netshift-fb-caseF-out-$$.json"
+cat > "$caseF_in" << 'XRAYJSON'
+[
+  {
+    "remarks": "no-sid",
+    "outbounds": [
+      {
+        "protocol": "vless",
+        "tag": "proxy-no-sid",
+        "settings": {"vnext": [{"address": "ru.example.com", "port": 443,
+          "users": [{"id": "1dff23f6-b2f1-4242-9746-b586808ed302",
+            "encryption": "none"}]}]},
+        "streamSettings": {"network": "tcp", "security": "reality",
+          "realitySettings": {"publicKey": "G2i-nsQgWiVf52tdCUV",
+            "serverName": "cloudrynth.com", "fingerprint": "firefox"}}
+      }
+    ]
+  }
+]
+XRAYJSON
+
+if normalize_subscription_to_singbox "$caseF_in" "$caseF_out" "testsub"; then
+    echo 'fb-caseF-rc:OK'
+else
+    echo 'fb-caseF-rc:FAIL'
+fi
+if validate_subscription_file "$caseF_out"; then
+    echo 'fb-caseF-validate:OK'
+else
+    echo 'fb-caseF-validate:FAIL'
+fi
+# No outbound may carry a literal "null" short_id, and the public_key must be set.
+if jq -e '([.outbounds[].tls.reality.short_id // empty] | map(select(. == "null")) | length) == 0
+        and ([.outbounds[] | select(.tls.reality.public_key == "G2i-nsQgWiVf52tdCUV")] | length == 1)' \
+        "$caseF_out" > /dev/null 2>&1; then
+    echo 'fb-caseF-no-null-sid:OK'
+else
+    echo 'fb-caseF-no-null-sid:FAIL'
+fi
+rm -f "$caseF_in" "$caseF_out"
+
+# ── CASE G: Xray JSON duplicate-node dedup ──────────────────────────
+# Providers commonly ship one server set across many "profiles"/balancers,
+# repeating identical nodes with only the display name differing. The
+# converter must dedup on the connection part (ignoring the #name), so N
+# copies of the same server collapse to one. Here three configs reference the
+# same two servers (A, B) plus one extra (C) -> exactly 3 unique outbounds.
+caseG_in="/tmp/netshift-fb-caseG-$$.json"
+caseG_out="/tmp/netshift-fb-caseG-out-$$.json"
+cat > "$caseG_in" << 'XRAYJSON'
+[
+  {"remarks": "profile-1", "outbounds": [
+    {"protocol": "vless", "tag": "A", "settings": {"vnext": [{"address": "a.example.com", "port": 443,
+      "users": [{"id": "11111111-1111-1111-1111-111111111111", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "ab", "serverName": "a.example.com", "fingerprint": "firefox"}}},
+    {"protocol": "vless", "tag": "B", "settings": {"vnext": [{"address": "b.example.com", "port": 443,
+      "users": [{"id": "22222222-2222-2222-2222-222222222222", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "cd", "serverName": "b.example.com", "fingerprint": "firefox"}}}
+  ]},
+  {"remarks": "profile-2", "outbounds": [
+    {"protocol": "vless", "tag": "A-copy", "settings": {"vnext": [{"address": "a.example.com", "port": 443,
+      "users": [{"id": "11111111-1111-1111-1111-111111111111", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "ab", "serverName": "a.example.com", "fingerprint": "firefox"}}},
+    {"protocol": "vless", "tag": "B-copy", "settings": {"vnext": [{"address": "b.example.com", "port": 443,
+      "users": [{"id": "22222222-2222-2222-2222-222222222222", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "cd", "serverName": "b.example.com", "fingerprint": "firefox"}}}
+  ]},
+  {"remarks": "profile-3", "outbounds": [
+    {"protocol": "vless", "tag": "C", "settings": {"vnext": [{"address": "c.example.com", "port": 443,
+      "users": [{"id": "33333333-3333-3333-3333-333333333333", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "ef", "serverName": "c.example.com", "fingerprint": "firefox"}}}
+  ]}
+]
+XRAYJSON
+
+if normalize_subscription_to_singbox "$caseG_in" "$caseG_out" "testsub"; then
+    echo 'fb-caseG-rc:OK'
+else
+    echo 'fb-caseG-rc:FAIL'
+fi
+# 5 raw nodes (A,B,A-copy,B-copy,C) must dedup to 3 unique servers (A,B,C).
+g_len="$(jq -r '.outbounds | length' "$caseG_out" 2>/dev/null)"
+[ -n "$g_len" ] || g_len=0
+if [ "$g_len" -eq 3 ]; then
+    echo "fb-caseG-dedup(==3 got $g_len):OK"
+else
+    echo "fb-caseG-dedup(==3 got $g_len):FAIL"
+fi
+# All three distinct servers must survive (a, b, c).
+if jq -e '([.outbounds[].server] | sort) == ["a.example.com","b.example.com","c.example.com"]' \
+        "$caseG_out" > /dev/null 2>&1; then
+    echo 'fb-caseG-servers:OK'
+else
+    echo 'fb-caseG-servers:FAIL'
+fi
+rm -f "$caseG_in" "$caseG_out"
+
+# ── CASE H: Xray JSON with unsupported VMess alongside VLESS ────────
+# The facade cannot build VMess. The converter must skip vmess but keep the
+# vless node, and xray_json_count_unsupported must report the dropped vmess so
+# the backend can warn the user instead of silently losing it.
+caseH_in="/tmp/netshift-fb-caseH-$$.json"
+caseH_out="/tmp/netshift-fb-caseH-out-$$.json"
+cat > "$caseH_in" << 'XRAYJSON'
+[
+  {
+    "remarks": "mixed",
+    "outbounds": [
+      {
+        "protocol": "vless",
+        "tag": "ok-vless",
+        "settings": {"vnext": [{"address": "vl.example.com", "port": 443,
+          "users": [{"id": "11111111-1111-1111-1111-111111111111",
+            "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+        "streamSettings": {"network": "tcp", "security": "reality",
+          "realitySettings": {"publicKey": "PK", "shortId": "ab",
+            "serverName": "vl.example.com", "fingerprint": "firefox"}}
+      },
+      {
+        "protocol": "vmess",
+        "tag": "drop-vmess",
+        "settings": {"vnext": [{"address": "vm.example.com", "port": 443,
+          "users": [{"id": "22222222-2222-2222-2222-222222222222",
+            "alterId": 0, "security": "auto"}]}]},
+        "streamSettings": {"network": "tcp", "security": "tls",
+          "tlsSettings": {"serverName": "vm.example.com"}}
+      }
+    ]
+  }
+]
+XRAYJSON
+
+if normalize_subscription_to_singbox "$caseH_in" "$caseH_out" "testsub"; then
+    echo 'fb-caseH-rc:OK'
+else
+    echo 'fb-caseH-rc:FAIL'
+fi
+# Exactly one usable outbound (vless); vmess dropped.
+h_len="$(jq -r '.outbounds | length' "$caseH_out" 2>/dev/null)"
+[ -n "$h_len" ] || h_len=0
+if [ "$h_len" -eq 1 ] \
+        && jq -e '.outbounds[0].server == "vl.example.com"' "$caseH_out" >/dev/null 2>&1; then
+    echo "fb-caseH-vless-kept(==1 got $h_len):OK"
+else
+    echo "fb-caseH-vless-kept(==1 got $h_len):FAIL"
+fi
+# The unsupported-protocol counter must report exactly one vmess.
+h_unsup="$(xray_json_count_unsupported "$caseH_in")"
+if [ "$h_unsup" = "1" ]; then
+    echo 'fb-caseH-vmess-counted:OK'
+else
+    echo "fb-caseH-vmess-counted(==1 got $h_unsup):FAIL"
+fi
+rm -f "$caseH_in" "$caseH_out"
+
+# ── CASE I: subscription User-Agent candidate building ──────────────
+# Auto mode (no configured UA) must emit, in order and without duplicates:
+# the default singbox/<ver> first, then the cached/preferred UA, then the
+# constants whitelist. A configured UA must short-circuit to exactly itself.
+caseI_default="$(get_subscription_user_agent)"
+
+# (a) Auto mode, no preferred: first line is the default; v2rayN present; no dup default.
+caseI_auto="$(build_subscription_user_agent_candidates "" "")"
+caseI_first="$(printf '%s\n' "$caseI_auto" | sed -n '1p')"
+if [ "$caseI_first" = "$caseI_default" ]; then
+    echo 'fb-caseI-auto-default-first:OK'
+else
+    echo "fb-caseI-auto-default-first(got '$caseI_first'):FAIL"
+fi
+if printf '%s\n' "$caseI_auto" | grep -Fxq 'v2rayN'; then
+    echo 'fb-caseI-auto-has-v2rayN:OK'
+else
+    echo 'fb-caseI-auto-has-v2rayN:FAIL'
+fi
+caseI_default_count="$(printf '%s\n' "$caseI_auto" | grep -Fxc "$caseI_default")"
+if [ "$caseI_default_count" = "1" ]; then
+    echo 'fb-caseI-auto-default-unique:OK'
+else
+    echo "fb-caseI-auto-default-unique(got $caseI_default_count):FAIL"
+fi
+
+# (b) Preferred UA is emitted right after the default and only once.
+caseI_pref="$(build_subscription_user_agent_candidates "" "Hiddify")"
+caseI_second="$(printf '%s\n' "$caseI_pref" | sed -n '2p')"
+caseI_hid_count="$(printf '%s\n' "$caseI_pref" | grep -Fxc 'Hiddify')"
+if [ "$caseI_second" = "Hiddify" ] && [ "$caseI_hid_count" = "1" ]; then
+    echo 'fb-caseI-preferred-second-unique:OK'
+else
+    echo "fb-caseI-preferred-second-unique(2nd='$caseI_second' count=$caseI_hid_count):FAIL"
+fi
+
+# (c) Configured UA short-circuits to exactly one line = itself.
+caseI_conf="$(build_subscription_user_agent_candidates "MyClient/1.0" "Hiddify")"
+caseI_conf_lines="$(printf '%s\n' "$caseI_conf" | grep -c .)"
+if [ "$caseI_conf" = "MyClient/1.0" ] && [ "$caseI_conf_lines" = "1" ]; then
+    echo 'fb-caseI-configured-only:OK'
+else
+    echo "fb-caseI-configured-only(got '$caseI_conf' lines=$caseI_conf_lines):FAIL"
+fi
+
 echo 'DONE'
 FBEOF
 

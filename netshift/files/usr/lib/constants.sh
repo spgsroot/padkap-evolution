@@ -14,6 +14,14 @@ TMP_RULESET_FOLDER="$TMP_SING_BOX_FOLDER/rulesets"
 TMP_SUBSCRIPTION_FOLDER="$TMP_SING_BOX_FOLDER/subscriptions"
 SUBSCRIPTION_CACHE_FOLDER="$NETSHIFT_STATE_DIR/subscriptions"
 TMP_SUBSCRIPTION_DOWNLOAD_FOLDER="$TMP_SING_BOX_FOLDER/subscription-downloads"
+# Subscription User-Agent fallback. Many panels return a DIFFERENT body format
+# depending on the client User-Agent (sing-box JSON vs base64 URI list vs Clash
+# vs Xray JSON, or an HTML/403 stub for unknown clients). When no User-Agent is
+# configured for a source, the backend tries these candidates in order and
+# keeps the first one that yields valid sing-box outbounds. The default
+# "singbox/<version>" candidate is prepended at runtime (it depends on the
+# installed sing-box). Order matters: most-likely-to-work first.
+SUBSCRIPTION_USER_AGENT_CANDIDATES="v2rayN Happ Hiddify Clash.Meta ClashMetaForAndroid"
 CLOUDFLARE_OCTETS="8.47 162.159 188.114" # Endpoints https://github.com/ampetelin/warp-endpoint-checker
 JQ_REQUIRED_VERSION="1.7.1"
 COREUTILS_BASE64_REQUIRED_VERSION="9.7"

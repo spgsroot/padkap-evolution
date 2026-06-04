@@ -167,6 +167,15 @@ get_subscription_rejected_cache_path() {
     echo "$SUBSCRIPTION_CACHE_FOLDER/${section}.rejected"
 }
 
+# Path of the cached "winning" User-Agent for a subscription source: the first
+# candidate that previously produced valid outbounds. Tried first on the next
+# refresh so we don't re-probe the whole whitelist every time.
+get_subscription_user_agent_cache_path() {
+    local section="$1"
+
+    echo "$SUBSCRIPTION_CACHE_FOLDER/${section}.user_agent"
+}
+
 ensure_subscription_cache_dir() {
     local state_dir_created=0 cache_dir_created=0
     local mkdir_errfile mkdir_rc
@@ -345,6 +354,8 @@ download_subscription_into_cache() {
     local subscription_url_cache_path="$4"
     local service_proxy_address="$5"
     local tmpfile persist_tmpfile url_tmpfile rejected_cache_path tmp_hash rejected_hash validation_reason file_size fallback_tmp
+    local configured_user_agent user_agent_cache_path cached_user_agent candidates_file
+    local effective_user_agent download_ok winning_user_agent ua_tmpfile
 
     ensure_subscription_cache_dir || {
         log "Failed to prepare persistent subscription cache directory '$SUBSCRIPTION_CACHE_FOLDER' for section '$section'" "error"
@@ -359,27 +370,73 @@ download_subscription_into_cache() {
         return 11
     }
 
-    if ! download_subscription "$subscription_url" "$tmpfile" "$service_proxy_address" 3 2 10; then
-        log "Subscription body download failed for section '$section' after retries" "error"
-        rm -f "$tmpfile"
-        return 12
+    # User-Agent fallback. Panels often key the returned body format off the
+    # client User-Agent, so when none is configured we probe a whitelist of
+    # well-known clients and keep the first that yields valid outbounds. The
+    # previously successful UA (cached) is tried first to avoid re-probing.
+    user_agent_cache_path="$(get_subscription_user_agent_cache_path "$section")"
+    configured_user_agent="$(uci -q get "netshift.${section}.subscription_user_agent" 2>/dev/null)"
+    cached_user_agent="$(cat "$user_agent_cache_path" 2>/dev/null)"
+    candidates_file="${tmpfile}.ua"
+    if ! build_subscription_user_agent_candidates "$configured_user_agent" "$cached_user_agent" > "$candidates_file"; then
+        log "Failed to build subscription User-Agent candidate list for section '$section'" "error"
+        rm -f "$tmpfile" "$candidates_file"
+        return 11
     fi
 
-    file_size="$(wc -c < "$tmpfile" 2>/dev/null | tr -d ' ')"
-    log "Downloaded subscription body for section '$section': bytes=${file_size:-unknown}" "debug"
+    download_ok=0
+    winning_user_agent=""
+    fallback_tmp="${tmpfile}.fb"
+    # Each candidate gets the full download (with its own retries) + validate +
+    # fallback-normalize pipeline. First success wins.
+    while IFS= read -r effective_user_agent || [ -n "$effective_user_agent" ]; do
+        [ -n "$effective_user_agent" ] || continue
 
-    if ! validate_subscription_file "$tmpfile"; then
-        # Fallback: provider returned base64 / plaintext key list instead of sing-box JSON
-        fallback_tmp="${tmpfile}.fb"
+        log "Trying subscription User-Agent for section '$section': $effective_user_agent" "info"
+
+        if ! download_subscription "$subscription_url" "$tmpfile" "$service_proxy_address" 3 2 10 "$effective_user_agent"; then
+            log "Subscription download failed for section '$section' with User-Agent '$effective_user_agent'; trying next candidate" "warn"
+            continue
+        fi
+
+        file_size="$(wc -c < "$tmpfile" 2>/dev/null | tr -d ' ')"
+        log "Downloaded subscription body for section '$section': bytes=${file_size:-unknown}, User-Agent='$effective_user_agent'" "debug"
+
+        if validate_subscription_file "$tmpfile"; then
+            download_ok=1
+            winning_user_agent="$effective_user_agent"
+            break
+        fi
+
+        # Fallback: provider returned base64 / plaintext key list or Xray JSON
+        # instead of a sing-box config.
         if normalize_subscription_to_singbox "$tmpfile" "$fallback_tmp" "$section" && validate_subscription_file "$fallback_tmp"; then
             mv -f "$fallback_tmp" "$tmpfile"
-            log "Subscription for section '$section' parsed via fallback (base64/plaintext key list)" "info"
+            log "Subscription for section '$section' parsed via fallback with User-Agent '$effective_user_agent'" "info"
+            download_ok=1
+            winning_user_agent="$effective_user_agent"
+            break
+        fi
+        rm -f "$fallback_tmp"
+
+        validation_reason="$(describe_subscription_validation_failure "$tmpfile")"
+        log "Downloaded subscription for section '$section' is invalid with User-Agent '$effective_user_agent': ${validation_reason:-unknown validation error}; trying next candidate" "warn"
+    done < "$candidates_file"
+    rm -f "$candidates_file"
+
+    if [ "$download_ok" -ne 1 ]; then
+        log "No subscription User-Agent candidate produced valid outbounds for section '$section'" "error"
+        rm -f "$tmpfile" "$fallback_tmp"
+        return 13
+    fi
+
+    # Persist the winning User-Agent so the next refresh tries it first.
+    if [ -n "$winning_user_agent" ]; then
+        ua_tmpfile="${user_agent_cache_path}.tmp.$$"
+        if printf '%s' "$winning_user_agent" > "$ua_tmpfile" && mv "$ua_tmpfile" "$user_agent_cache_path"; then
+            chmod 600 "$user_agent_cache_path" 2>/dev/null
         else
-            rm -f "$fallback_tmp"
-            validation_reason="$(describe_subscription_validation_failure "$tmpfile")"
-            log "Downloaded subscription for section '$section' is invalid: ${validation_reason:-unknown validation error}" "error"
-            rm -f "$tmpfile"
-            return 13
+            rm -f "$ua_tmpfile"
         fi
     fi
 
