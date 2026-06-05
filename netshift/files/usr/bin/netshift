@@ -228,6 +228,7 @@ migrate_subscription_cache_from_tmp() {
 
 mark_subscription_outbound_unavailable() {
     local section="$1"
+    local keyword_filter_active="${2:-0}"
     local subscription_json_path rejected_cache_path rejected_hash
 
     case " $SUBSCRIPTION_UNAVAILABLE_SECTIONS " in
@@ -235,12 +236,26 @@ mark_subscription_outbound_unavailable() {
     *) SUBSCRIPTION_UNAVAILABLE_SECTIONS="$SUBSCRIPTION_UNAVAILABLE_SECTIONS $section" ;;
     esac
 
+    subscription_json_path="$(get_subscription_json_path "$section")"
+    rejected_cache_path="$(get_subscription_rejected_cache_path "$section")"
+
+    if [ "$keyword_filter_active" -eq 1 ]; then
+        # The empty result came from the user's keyword filter, not from a bad
+        # feed: the body itself may be perfectly valid. Recording its hash here
+        # would poison the cache and wedge future downloads (return 14 loop), and
+        # would also survive the user loosening the filter. So never write the
+        # rejected-hash for this case, and proactively clear any stale one so a
+        # body poisoned by an earlier empty-filter run self-heals on this pass.
+        rm -f "$rejected_cache_path"
+        log "Subscription keyword filter for section '$section' removed all nodes; matching traffic for this section will be rejected until the filter is loosened or a matching node appears (the feed itself is not rejected)" "warn"
+        subscription_startup_blocked=1
+        return 0
+    fi
+
     log "Subscription cache for section '$section' is unavailable; matching traffic for this section will be rejected until refresh succeeds" "warn"
     # A structurally valid subscription can still contain no sing-box usable
     # proxy outbounds. Remember its hash so the retry worker does not persist,
     # restart and reject exactly the same unusable feed in a flash-writing loop.
-    subscription_json_path="$(get_subscription_json_path "$section")"
-    rejected_cache_path="$(get_subscription_rejected_cache_path "$section")"
     rejected_hash="$(md5sum "$subscription_json_path" 2>/dev/null | awk '{print $1}')"
     if [ -n "$rejected_hash" ] && [ "$(cat "$rejected_cache_path" 2>/dev/null)" != "$rejected_hash" ]; then
         printf '%s' "$rejected_hash" > "${rejected_cache_path}.tmp.$$" && mv "${rejected_cache_path}.tmp.$$" "$rejected_cache_path"
@@ -306,11 +321,28 @@ get_subscription_download_proxy_address() {
 
 subscription_cache_is_usable() {
     local subscription_json_path="$1"
-    local rejected_cache_path current_hash rejected_hash
+    local rejected_cache_path current_hash rejected_hash has_proxy_outbound
 
     [ -s "$subscription_json_path" ] || return 1
 
     validate_subscription_file "$subscription_json_path" || return 1
+
+    # The rejected-hash veto must only be able to reject a body that does NOT
+    # actually contain usable proxy outbounds (the genuine flash-loop guard). A
+    # structurally valid body with >=1 proxy outbound is a real subscription and
+    # is always usable, regardless of any stale rejected-hash (e.g. one poisoned
+    # by an over-strict keyword filter before task-011). Same predicate as the
+    # batch (candidate = not selector/urltest/direct/dns/block); no Oniguruma.
+    has_proxy_outbound="$(jq -e '
+        [.outbounds[]? | select(
+            .type != "selector" and
+            .type != "urltest" and
+            .type != "direct" and
+            .type != "dns" and
+            .type != "block"
+        )] | length > 0
+    ' "$subscription_json_path" >/dev/null 2>&1 && echo 1 || echo 0)"
+    [ "$has_proxy_outbound" = "1" ] && return 0
 
     rejected_cache_path="${subscription_json_path%.json}.rejected"
     if [ -s "$rejected_cache_path" ]; then
@@ -1638,7 +1670,7 @@ configure_outbound_handler() {
                 # where add_subscription_outbounds actually ran the filter), so we
                 # do not re-warn here to avoid misattribution / double-warning.
                 log "Subscription cache for section '$section' is unavailable or empty; using a temporary blocked outbound" "warn"
-                mark_subscription_outbound_unavailable "$section"
+                mark_subscription_outbound_unavailable "$section" "$subscription_keyword_filter_active"
             else
                 selector_tag="$(get_outbound_tag_by_section "$section")"
                 subscription_outbound_tags_json="$SUBSCRIPTION_OUTBOUND_TAGS_JSON"

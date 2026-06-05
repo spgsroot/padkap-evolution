@@ -264,3 +264,46 @@ findings; keep under ~200 lines.
   `Орёл`, etc.) in the heredoc are fine; assert via `.count`/`.names`. Used a
   `case "$x" in *Польша*)` membership check rather than exact-name compare for the
   exclude case (order-independent). All ran green in-container.
+
+## task-011: keyword filter must not poison the subscription rejected-hash
+
+- Root cause of the hardware re-download loop: `mark_subscription_outbound_unavailable`
+  (`bin/netshift`) md5'd the VALID `<section>.json` and wrote it to `.rejected`
+  even when `kept=0` was caused purely by the user's keyword filter (a setting,
+  not a bad feed). Then `subscription_cache_is_usable` — which had already passed
+  `validate_subscription_file` — still returned 1 on the hash match, forcing a
+  re-download; `download_subscription_into_cache` saw tmp_hash==rejected_hash and
+  `return 14` (unchanged+rejected) → infinite retry. The poison also survived
+  loosening the filter (lived only in `.rejected`).
+- Fix A: 2nd arg `keyword_filter_active="${2:-0}"`. When 1: NEVER compute/write
+  the hash, `rm -f` the `.rejected` (self-heals a previously poisoned hash), still
+  set unavailable state + `subscription_startup_blocked=1`, warn that the FILTER
+  (not the feed) emptied the set. When 0: unchanged (genuine outbound-less body
+  still recorded → flash-loop guard kept). Caller at the `subscription)` branch
+  passes `$subscription_keyword_filter_active` (set 0/1 just above from the two
+  UCI keyword lists).
+- Fix B: in `subscription_cache_is_usable`, after `validate_subscription_file`,
+  run a jq -e "has >=1 proxy outbound" check (same predicate as the batch:
+  `[.outbounds[]? | select(.type != "selector" and ... != "block")] | length > 0`,
+  NO Oniguruma) → if true `return 0` (usable) regardless of `.rejected`. The
+  rejected-hash veto now only fires on a validated-but-outbound-less body. NB:
+  `validate_subscription_file` ALREADY requires length>0, so a 0-proxy body fails
+  validation first — B is belt-and-suspenders + self-documenting, and robust if
+  validation ever loosens. Did NOT touch `download_subscription_into_cache`'s own
+  rejected logic (spec: once A/B stop writing+vetoing, a valid body has no
+  `.rejected` so return 14 can't fire for it).
+- **Testing functions that live in `bin/netshift` (not a lib):** can't source the
+  file (it runs the dispatcher + needs LuCI `/lib/functions.sh`). Pattern that
+  works: a generated driver that (1) stubs the few helpers the target calls
+  (`log`, the `get_subscription_*_path` builders), (2) sources `helpers.sh` for
+  the real `validate_subscription_file`, (3) extracts JUST the target functions
+  verbatim with awk and `eval`s them:
+  `eval "$(awk '/^fname\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "$bin")"`. Relies on
+  top-level functions closing with a column-0 `}` and having no nested column-0
+  `}` (case/if/while bodies don't). Keeps the test against shipped code, not a copy.
+- New top-level smoke test `test_rejected_hash` (alias `rejected`): 6 cases
+  (A-no-write+clear, A-recovery, B-not-vetoed, A-protected-no-proxy-still-vetoed,
+  regression-usable, A-arg0-genuine-recorded). Registered in `all)`, case alias,
+  usage "Available:" line, docker-compose comment. Same name:OK/FAIL parse + the
+  subshell-pipe PASS-counter quirk as test_subscription (suite `Results:` total
+  omits piped-while passes; the per-test ✓ marks are the source of truth).

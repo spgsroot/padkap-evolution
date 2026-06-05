@@ -1995,6 +1995,192 @@ CURL5EOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: Subscription rejected-hash validity (task-011)
+# ─────────────────────────────────────────────────────────────────
+# Verifies the keyword-filter no longer poisons the per-section .rejected hash
+# and that a structurally valid body with >=1 proxy outbound is never vetoed by
+# a stale rejected-hash, while a genuinely outbound-less body still is. The two
+# functions under test (mark_subscription_outbound_unavailable,
+# subscription_cache_is_usable) live in /usr/bin/netshift, not a sourceable lib,
+# so a tiny driver extracts JUST those two functions verbatim from the live bin
+# (awk between the `name() {` line and the matching column-0 `}`), stubs the few
+# helpers they call (log + the path builders), sources helpers.sh for the real
+# validate_subscription_file, and re-pins SUBSCRIPTION_CACHE_FOLDER to a temp
+# dir. Tokens use the same name:OK/FAIL convention as test_subscription.
+test_rejected_hash() {
+    header "Subscription Rejected-Hash Validity (task-011)"
+
+    if ! command -v jq > /dev/null 2>&1; then
+        skip "jq not available"
+        return
+    fi
+
+    local bin="${NETSHIFT_SRC}/usr/bin/netshift"
+    local helpers="${NETSHIFT_LIB_DIR}/helpers.sh"
+    if [ ! -r "$bin" ] || [ ! -r "$helpers" ]; then
+        skip "netshift bin / helpers.sh not found"
+        return
+    fi
+
+    local drv="/tmp/netshift-rejected-$$.sh"
+    cat > "$drv" << 'RHEOF'
+# Isolated cache dir for this run (the path builders read SUBSCRIPTION_CACHE_FOLDER).
+SUBSCRIPTION_CACHE_FOLDER="${RH_CACHE_DIR:-/tmp/netshift-rejected-cache}"
+mkdir -p "$SUBSCRIPTION_CACHE_FOLDER"
+
+# Quiet stubs for the logger used by the functions under test.
+log() { :; }
+echolog() { :; }
+nolog() { :; }
+
+# Path builders are tiny; stub them exactly like the bin so the functions
+# resolve the temp cache dir.
+get_subscription_json_path() { echo "$SUBSCRIPTION_CACHE_FOLDER/${1}.json"; }
+get_subscription_rejected_cache_path() { echo "$SUBSCRIPTION_CACHE_FOLDER/${1}.rejected"; }
+
+# Real validate_subscription_file from helpers.sh (no other deps needed).
+. "HELPERS_PATH"
+
+# Pull the two functions under test VERBATIM out of the live bin so the test
+# exercises the shipped code, not a copy. awk grabs from the function opener to
+# its matching column-0 closing brace.
+eval "$(awk '/^mark_subscription_outbound_unavailable\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+eval "$(awk '/^subscription_cache_is_usable\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+
+# Globals the functions touch.
+SUBSCRIPTION_UNAVAILABLE_SECTIONS=""
+subscription_startup_blocked=0
+
+valid_body='{
+  "outbounds": [
+    {"type": "shadowsocks", "tag": "ss-01", "server": "a.example.com", "server_port": 443, "method": "aes-256-gcm", "password": "p"},
+    {"type": "selector", "tag": "select", "outbounds": ["ss-01"]}
+  ]
+}'
+
+# ── CASE 1: A — over-strict keyword filter (kept=0) must NOT write .rejected,
+#            and must remove a pre-existing one. ─────────────────────────────
+s1="sec1"
+printf '%s' "$valid_body" > "$(get_subscription_json_path "$s1")"
+# Pre-poison with this body's hash; arg=1 (keyword filter) must clear it.
+md5sum "$(get_subscription_json_path "$s1")" | awk '{print $1}' \
+    > "$(get_subscription_rejected_cache_path "$s1")"
+mark_subscription_outbound_unavailable "$s1" 1
+if [ ! -e "$(get_subscription_rejected_cache_path "$s1")" ]; then
+    echo 'rh-case1-filter-no-rejected:OK'
+else
+    echo 'rh-case1-filter-no-rejected:FAIL'
+fi
+if [ "$subscription_startup_blocked" = "1" ]; then
+    echo 'rh-case1-blocked-state-set:OK'
+else
+    echo 'rh-case1-blocked-state-set:FAIL'
+fi
+
+# ── CASE 2: A-recovery — pre-existing .rejected == a valid body hash, call with
+#            arg=1, assert .rejected gone (self-heal). ────────────────────────
+s2="sec2"
+printf '%s' "$valid_body" > "$(get_subscription_json_path "$s2")"
+md5sum "$(get_subscription_json_path "$s2")" | awk '{print $1}' \
+    > "$(get_subscription_rejected_cache_path "$s2")"
+[ -s "$(get_subscription_rejected_cache_path "$s2")" ] && pre2=1 || pre2=0
+mark_subscription_outbound_unavailable "$s2" 1
+if [ "$pre2" = "1" ] && [ ! -e "$(get_subscription_rejected_cache_path "$s2")" ]; then
+    echo 'rh-case2-recovery-rejected-removed:OK'
+else
+    echo 'rh-case2-recovery-rejected-removed:FAIL'
+fi
+
+# ── CASE 3: B — valid body with >=1 proxy outbound + .rejected == its hash ⇒
+#            subscription_cache_is_usable returns 0 (usable). ─────────────────
+s3="sec3"
+s3_json="$(get_subscription_json_path "$s3")"
+printf '%s' "$valid_body" > "$s3_json"
+md5sum "$s3_json" | awk '{print $1}' > "$(get_subscription_rejected_cache_path "$s3")"
+if subscription_cache_is_usable "$s3_json"; then
+    echo 'rh-case3-valid-body-not-vetoed:OK'
+else
+    echo 'rh-case3-valid-body-not-vetoed:FAIL'
+fi
+
+# ── CASE 4: A-protected — a JSON body with ZERO proxy outbounds whose hash is in
+#            .rejected ⇒ still vetoed (return 1). validate_subscription_file
+#            itself requires >=1 proxy outbound, so an outbound-less body is
+#            rejected at validation; this case proves the guard still holds. ──
+s4="sec4"
+s4_json="$(get_subscription_json_path "$s4")"
+cat > "$s4_json" << 'NOPROXY'
+{
+  "outbounds": [
+    {"type": "selector", "tag": "select", "outbounds": []},
+    {"type": "direct", "tag": "direct"},
+    {"type": "block", "tag": "block"}
+  ]
+}
+NOPROXY
+md5sum "$s4_json" | awk '{print $1}' > "$(get_subscription_rejected_cache_path "$s4")"
+if subscription_cache_is_usable "$s4_json"; then
+    echo 'rh-case4-no-proxy-body-vetoed:FAIL'
+else
+    echo 'rh-case4-no-proxy-body-vetoed:OK'
+fi
+
+# ── CASE 5: Regression — a normal valid body, no .rejected ⇒ usable (0). ──────
+s5="sec5"
+s5_json="$(get_subscription_json_path "$s5")"
+printf '%s' "$valid_body" > "$s5_json"
+rm -f "$(get_subscription_rejected_cache_path "$s5")"
+if subscription_cache_is_usable "$s5_json"; then
+    echo 'rh-case5-normal-valid-usable:OK'
+else
+    echo 'rh-case5-normal-valid-usable:FAIL'
+fi
+
+# ── CASE 6: A — keyword_filter_active=0 (default) still records the rejected
+#            hash for a genuinely outbound-less body (flash-loop guard kept). ──
+s6="sec6"
+s6_json="$(get_subscription_json_path "$s6")"
+cat > "$s6_json" << 'NOPROXY'
+{
+  "outbounds": [
+    {"type": "direct", "tag": "direct"},
+    {"type": "block", "tag": "block"}
+  ]
+}
+NOPROXY
+rm -f "$(get_subscription_rejected_cache_path "$s6")"
+mark_subscription_outbound_unavailable "$s6" 0
+expect6="$(md5sum "$s6_json" | awk '{print $1}')"
+got6="$(cat "$(get_subscription_rejected_cache_path "$s6")" 2>/dev/null)"
+if [ -s "$(get_subscription_rejected_cache_path "$s6")" ] && [ "$got6" = "$expect6" ]; then
+    echo 'rh-case6-genuine-unusable-recorded:OK'
+else
+    echo 'rh-case6-genuine-unusable-recorded:FAIL'
+fi
+
+echo 'DONE'
+RHEOF
+
+    sed -i "s|HELPERS_PATH|$helpers|g; s|BIN_PATH|$bin|g" "$drv"
+
+    local rhcache="/tmp/netshift-rejected-cache-$$"
+    rm -rf "$rhcache"
+
+    RH_CACHE_DIR="$rhcache" ash "$drv" 2>/dev/null | while IFS= read -r line; do
+        case "$line" in
+            *:OK) pass "$line" ;;
+            *:FAIL) fail "$line" ;;
+            *:SKIP) skip "$line" ;;
+            DONE) ;;
+            *) ;;
+        esac
+    done
+
+    rm -rf "$rhcache"
+    rm -f "$drv"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────
 main() {
@@ -2018,6 +2204,7 @@ main() {
             test_nft
             test_diagnostics
             test_subscription
+            test_rejected_hash
             test_jobstate
             test_selfheal
             ;;
@@ -2028,6 +2215,7 @@ main() {
         nft)         test_nft ;;
         diagnostics) test_diagnostics ;;
         subscription) test_subscription ;;
+        rejected)    test_rejected_hash ;;
         jobstate)    test_jobstate ;;
         selfheal)    test_selfheal ;;
         jq)          test_jq_helpers ;;
@@ -2035,7 +2223,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft diagnostics subscription jobstate selfheal"
+            echo "Available: all deps syntax config helpers jq cm sb nft diagnostics subscription rejected jobstate selfheal"
             exit 1
             ;;
     esac
