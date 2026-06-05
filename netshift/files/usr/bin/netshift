@@ -3276,6 +3276,11 @@ check_sing_box() {
         version=$(sing-box version 2> /dev/null | head -n 1 | awk '{print $3}')
         if [ -n "$version" ]; then
             version=$(echo "$version" | sed 's/^v//')
+            # Extended cores report e.g. "1.13.12-extended-2.3.2"; the author only changes
+            # the trailing "-extended-X.Y.Z" while the leading semver is the true upstream
+            # sing-box version. Strip everything from the first '-' so the numeric compare
+            # below works for both stock and extended builds.
+            version=${version%%-*}
             local major
             local minor
             local patch
@@ -3283,10 +3288,14 @@ check_sing_box() {
             minor=$(echo "$version" | cut -d. -f2)
             patch=$(echo "$version" | cut -d. -f3)
 
-            # Compare version: must be >= 1.12.4
+            # Compare version: must be >= 1.12.4. Each AND-term is grouped in
+            # { ...; } so the || branches are independent — POSIX list operators
+            # && / || are equal-precedence/left-associative, so without grouping
+            # the trailing minor/patch tests would wrongly gate every branch
+            # (e.g. 1.13.x and 2.0.0 would evaluate as not-compatible).
             if [ "$major" -gt 1 ] ||
-                [ "$major" -eq 1 ] && [ "$minor" -gt 12 ] ||
-                [ "$major" -eq 1 ] && [ "$minor" -eq 12 ] && [ "$patch" -ge 4 ]; then
+                { [ "$major" -eq 1 ] && [ "$minor" -gt 12 ]; } ||
+                { [ "$major" -eq 1 ] && [ "$minor" -eq 12 ] && [ "$patch" -ge 4 ]; }; then
                 sing_box_version_ok=1
             fi
         fi

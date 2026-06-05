@@ -183,6 +183,38 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   gate generation behind `is_sing_box_extended` and fail safe (warn + skip) when
   stock sing-box is installed, exactly like xhttp does today.
 
+## sing-box-extended version diagnostic (task-013 — done 2026-06-05)
+
+- BUG: `check_sing_box` (usr/bin/netshift ~3276) showed "❌ version not compatible"
+  on the extended core. TWO coupled defects:
+  1. `awk '{print $3}'` on `sing-box version 1.13.12-extended-2.3.2` → patch via
+     `cut -d. -f3` = `12-extended-2` (non-numeric) → `[: bad number`.
+  2. The compare `if [ A ] || [ B ] && [ C ] || [ D ] && [ E ] && [ F ]` was
+     UNGROUPED. POSIX `&&`/`||` are EQUAL-precedence, LEFT-associative, so it
+     parses `(((((A||B)&&C)||D)&&E)&&F)` — the trailing E/F gate EVERY branch,
+     so 1.13.x AND 2.0.0 evaluate as not-compatible even with a numeric patch.
+- FIX (Variant 2, operator-chosen): strip suffix `version=${version%%-*}` (gives
+  honest semver; extended author only bumps the trailing `-extended-X.Y.Z`,
+  leading major.minor.patch is true upstream sing-box) + regroup each AND-term in
+  `{ ...; }`. Kept threshold 1.12.4 + printed text. Did NOT touch check_requirements
+  (uses sort -V, already extended-safe). 1-file change, gates green.
+- LANDMINE for future tasks: any `[ ] || [ ] && [ ]` chain in this repo without
+  `{ ...; }` grouping is suspect — equal precedence means trailing AND-terms leak
+  into prior OR-branches. Group every AND-term. (My first decomposition wrongly
+  assumed the strip alone fixed it; the dev caught the precedence bug on live
+  reasoning — TRUST dev "second defect" flags, re-derive the truth table myself.)
+- Extended core real output (operator hardware, captured for the epic): version
+  `1.13.12-extended-2.3.2`, Tags include `with_quic,with_wireguard,with_utls,
+  with_masque,with_mtproxy,with_openvpn,with_trusttunnel,with_sudoku,
+  with_naive_outbound,with_gvisor`. So the shtorm-7 build SHIPS the build-tags for
+  nearly all of epic Tiers 1–3 (tuic/hysteria need with_quic ✅, AWG needs
+  with_wireguard ✅, sudoku/trusttunnel/openvpn ✅) — CX-4 build-tag uncertainty is
+  largely resolved EMPIRICALLY for this build; still gate generation behind
+  is_sing_box_extended + tolerate a per-protocol `sing-box check` rejection.
+- SECOND hardcode of the version threshold confirmed: check_sing_box hardcodes
+  "1.12.4" (major/minor/patch literals + text) while SB_REQUIRED_VERSION=1.12.0 in
+  constants.sh. Known rassinkhron; left as-is per operator (out of task-013 scope).
+
 ## Subscription keyword filter — Cyrillic case bug (task-010, found on hardware 2026-06)
 
 - REAL bug (not version skew): the keyword filter's "case-insensitive" claim only

@@ -330,3 +330,30 @@ findings; keep under ~200 lines.
   server/uuid/transport/tls on the generated outbound. The existing ws/tcp/plus
   cases (no `#`) double as the no-fragment regression. shellcheck -S error clean;
   `all` = 76 passed / 0 failed.
+
+## task-013: sing-box-extended version diagnostic (build-suffix strip)
+
+- Root cause: `check_sing_box()` (`bin/netshift`, ~:3276) does
+  `version=$(sing-box version | awk '{print $3}')` then `patch=$(... cut -d. -f3)`.
+  Extended core prints `1.13.12-extended-2.3.2`, so `patch` became
+  `12-extended-2` → non-numeric → `[ "$patch" -ge 4 ]` errors `bad number` →
+  `❌ not compatible`. Stock cores have numeric patch so they passed.
+- Fix (Variant A′, ONE line + comment): right after the existing
+  `version=$(echo "$version" | sed 's/^v//')`, add `version=${version%%-*}`
+  (POSIX longest-`-…`-suffix strip; no fork/jq/regex). `1.13.12-extended-2.3.2`
+  → `1.13.12`; stock `1.12.0` has no `-` so unchanged; also tolerates future
+  `-beta`/`-rc`. `major`/`minor`/`patch` are already `local`; no new vars.
+- **OUT-OF-SCOPE PRE-EXISTING BUG (left untouched per spec, but flag it):** the
+  comparison chain `if [ "$major" -gt 1 ] || [ "$major" -eq 1 ] && [ "$minor"
+  -gt 12 ] || ... && [ "$patch" -ge 4 ]` has wrong precedence — POSIX `[]`
+  `&&`/`||` are equal-precedence left-associative, so it evaluates as
+  `(...) && [ "$patch" -ge 4 ]`, making the final patch test gate EVERY branch.
+  Result: `1.13.12` and even `2.0.0` evaluate to version_ok=0 (only `1.12.x>=4`
+  passes). The spec (task-013) explicitly says do NOT rewrite the chain — it
+  only fixes the non-numeric `bad number` crash. So the extended diagnostic no
+  longer errors, but a TRUE fix of "newer than 1.12.4 ⇒ compatible" needs a
+  follow-up task to correct the chain (e.g. parenthesize each branch in a
+  single `[ ]` per term or use `sort -V` like `check_requirements` does).
+- Smoke: NO new test (pure string strip, no new control flow — per spec). Reran
+  `shellcheck -S error` clean on `bin/netshift`; `smoke-tests all` = 76 passed /
+  0 failed.
