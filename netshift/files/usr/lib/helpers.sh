@@ -236,6 +236,11 @@ vmess_link_to_json() {
     local payload decoded pad_len
 
     payload="${url#vmess://}"
+    # Strip a trailing '#fragment' (server display name / remark, like vless/ss/
+    # trojan). The base64 body never contains '#', so cutting at the FIRST '#'
+    # is safe; a fragment-less payload is a no-op. The canonical VMess name lives
+    # in the decoded JSON `ps` field, so we only need to drop the fragment here.
+    payload="${payload%%#*}"
     [ -n "$payload" ] || return 0
 
     # Normalize: strip whitespace (space, tab, CR, LF via octal escapes — busybox

@@ -547,14 +547,15 @@ function validateVmessUrl(url) {
       message: _("Invalid VMess URL: must start with vmess://")
     };
   }
-  if (/\s/.test(url)) {
+  const body = url.slice("vmess://".length);
+  const b64 = body.split("#")[0];
+  if (/\s/.test(b64)) {
     return {
       valid: false,
       message: _("Invalid VMess URL: must not contain spaces")
     };
   }
-  const body = url.slice("vmess://".length);
-  const padded = body + "=".repeat((4 - body.length % 4) % 4);
+  const padded = b64 + "=".repeat((4 - b64.length % 4) % 4);
   let decoded;
   try {
     decoded = atob(padded);

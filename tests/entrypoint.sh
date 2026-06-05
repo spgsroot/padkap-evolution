@@ -442,6 +442,17 @@ ws_link="vmess://$(printf '%s' "$ws_json" | base64 | tr -d '\n')"
 tcp_json='{"v":"2","ps":"node-tcp","add":"tcp.example.com","port":"8080","id":"99999999-8888-7777-6666-555555555555","aid":"0","scy":"auto","net":"tcp","host":"","path":"","tls":"","sni":"","alpn":"","fp":""}'
 tcp_link="vmess://$(printf '%s' "$tcp_json" | base64 | tr -d '\n')"
 
+# task-012: a key with a trailing '#fragment' (server display name / remark,
+# like the user's real key `...In0=#🇳🇱Ne`). The '#' + emoji/Cyrillic bytes must
+# be STRIPPED before base64 decode; the canonical name still comes from `ps`.
+frag_json='{"v":"2","ps":"node-frag","add":"frag.example.com","port":"443","id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","aid":"0","scy":"auto","net":"ws","host":"frag.example.com","path":"/fragpath","tls":"tls","sni":"frag.example.com","alpn":"","fp":""}'
+frag_link="vmess://$(printf '%s' "$frag_json" | base64 | tr -d '\n')#🇳🇱Ne"
+# Sanity: confirm the crafted link actually carries a '#fragment'.
+case "$frag_link" in
+*#*) echo 'vmess-frag-link-has-hash:OK' ;;
+*) echo 'vmess-frag-link-has-hash:FAIL' ;;
+esac
+
 # REGRESSION (S1): a key whose STANDARD base64 body DELIBERATELY contains a '+'.
 # The "node>>" ps label (bytes 0x3E 0x3E) forces a base64 group that maps to
 # '+' (alphabet index 62). If the facade url_decode'd the link before decoding,
@@ -484,6 +495,17 @@ echo "$out_plus" | jq -e '.outbounds[0].type == "vmess"' >/dev/null 2>&1 && echo
 echo "$out_plus" | jq -e '.outbounds[0].server == "plus.example.com"' >/dev/null 2>&1 && echo 'vmess-plus-server:OK' || echo 'vmess-plus-server:FAIL'
 echo "$out_plus" | jq -e '.outbounds[0].server_port == 2053' >/dev/null 2>&1 && echo 'vmess-plus-port:OK' || echo 'vmess-plus-port:FAIL'
 echo "$out_plus" | jq -e '.outbounds[0].uuid == "abcdef00-1111-2222-3333-444455556666"' >/dev/null 2>&1 && echo 'vmess-plus-uuid:OK' || echo 'vmess-plus-uuid:FAIL'
+
+# ── task-012: '#fragment' link must parse (fragment stripped before decode) ──
+out_frag=$(sing_box_cf_add_proxy_outbound "$base_config" "vmess_frag" "$frag_link" "0")
+echo "$out_frag" | jq -e '.outbounds[0].type == "vmess"' >/dev/null 2>&1 && echo 'vmess-frag-type:OK' || echo 'vmess-frag-type:FAIL'
+echo "$out_frag" | jq -e '.outbounds[0].server == "frag.example.com"' >/dev/null 2>&1 && echo 'vmess-frag-server:OK' || echo 'vmess-frag-server:FAIL'
+echo "$out_frag" | jq -e '.outbounds[0].server_port == 443' >/dev/null 2>&1 && echo 'vmess-frag-port:OK' || echo 'vmess-frag-port:FAIL'
+echo "$out_frag" | jq -e '.outbounds[0].uuid == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"' >/dev/null 2>&1 && echo 'vmess-frag-uuid:OK' || echo 'vmess-frag-uuid:FAIL'
+echo "$out_frag" | jq -e '.outbounds[0].transport.type == "ws"' >/dev/null 2>&1 && echo 'vmess-frag-transport:OK' || echo 'vmess-frag-transport:FAIL'
+echo "$out_frag" | jq -e '.outbounds[0].transport.path == "/fragpath"' >/dev/null 2>&1 && echo 'vmess-frag-path:OK' || echo 'vmess-frag-path:FAIL'
+echo "$out_frag" | jq -e '.outbounds[0].tls.enabled == true' >/dev/null 2>&1 && echo 'vmess-frag-tls:OK' || echo 'vmess-frag-tls:FAIL'
+echo "$out_frag" | jq -e '.outbounds[0].tls.server_name == "frag.example.com"' >/dev/null 2>&1 && echo 'vmess-frag-sni:OK' || echo 'vmess-frag-sni:FAIL'
 
 # ── Extended OFF: gate returns config UNCHANGED (no vmess outbound) ──
 is_sing_box_extended() { return 1; }

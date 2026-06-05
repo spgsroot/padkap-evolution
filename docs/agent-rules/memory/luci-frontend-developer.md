@@ -168,3 +168,21 @@ append findings; keep under ~200 lines.
   (`src\\validators\\...`) — generating it on Windows does NOT churn separators.
 - The proxy-link help string `"vless://, ... links"` is duplicated 3× in
   `section.js` (proxy_string + selector + urltest fields) — use edit replaceAll.
+
+## VMess `#fragment` strip (task-012)
+
+- `vmess://<base64(JSON)>#name` — the `#…` is the server display-name remark
+  (same as vless/ss/trojan), but for VMess the name also lives in JSON `ps`.
+  V2RayN base64 NEVER contains `#`, so cut at the FIRST `#` before decode.
+- `validateVmessUrl` order MATTERS: derive `body = url.slice('vmess://'.length)`
+  → `b64 = body.split('#')[0]` → THEN run the `/\s/` whitespace check on `b64`
+  (NOT the full url), THEN pad/`atob` `b64`. This lets a `#name with spaces`
+  fragment validate while still rejecting whitespace inside the base64 body.
+  (The old code ran `/\s/` on the full url and padded `body` incl. fragment →
+  emoji/Cyrillic in `#🇳🇱Ne` corrupted base64 → "malformed base64".)
+- Real-user regression fixture is the long `eyJ…In0=#🇳🇱Ne` literal in the test;
+  keep a malformed-base64 negative case WITHOUT a `#` (`vmess://@@@@`) so it
+  still fails for the right reason, and a `vmess://<b64> ` (trailing space, no
+  `#`) case proving base64-body whitespace is still rejected.
+- main.js diff for this fix is exactly the `validateVmessUrl` function body
+  (body/b64 split + whitespace-on-b64 + pad b64) — expected-only.

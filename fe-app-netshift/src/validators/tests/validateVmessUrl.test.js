@@ -31,12 +31,22 @@ const plusB64 = b64({ ...baseConfig, ps: '>>>' });
 // An unpadded base64 variant of a valid config (strip trailing '=' padding).
 const unpaddedBody = b64(baseConfig).replace(/=+$/, '');
 
+// The user's REAL key: V2RayN base64(JSON) followed by a "#🇳🇱Ne" display-name
+// fragment. The fragment (emoji/Cyrillic/etc.) used to corrupt the base64 and
+// throw "malformed base64"; stripping it before decode must validate it.
+const realUserKey =
+  'vmess://eyJhZGQiOiJyZW5kZXJlci1zdHJlYW0tMS00MTEubWlycmEubm93IiwiYWlkIjoiMCIsImFsbG93SW5zZWN1cmUiOiIwIiwiYWxsb3dfaW5zZWN1cmUiOiIwIiwiaG9zdCI6InJlbmRlcmVyLXN0cmVhbS0xLTQxMS5taXJyYS5ub3ciLCJpZCI6ImRmOWM5MzU1LWIwMmMtNGMxMi05MDlkLTBkYmViNzI1ZDUyYiIsImluc2VjdXJlIjoiMCIsIm5ldCI6IndzIiwicGF0aCI6Ii9hcGkvdjEvZ3B1LXN0cmVhbS9zb2NrZXQiLCJwb3J0IjoiNDQzIiwicHMiOiLwn4ez8J+HsSBUaGUgTmV0aGVybGFuZHMgfCBbKkNJRFJdIiwic2VjdXJpdHkiOiJhdXRvIiwic25pIjoicmVuZGVyZXItc3RyZWFtLTEtNDExLm1pcnJhLm5vdyIsInRscyI6InRscyIsInYiOiIyIiwidHlwZSI6Im5vbmUiLCJzY3kiOiJhdXRvIiwiYWxwbiI6IiIsImZwIjoiIn0=#🇳🇱Ne';
+
 const validUrls = [
   ['basic add/port/id', vmess({ add: '1.2.3.4', port: 443, id: 'uuid-1' })],
   ['full config with net:ws tls:tls', vmess(baseConfig)],
   ['port as numeric string', vmess({ ...baseConfig, port: '8443' })],
   ['base64 body containing "+"', `vmess://${plusB64}`],
   ['unpadded base64 body', `vmess://${unpaddedBody}`],
+  ["user's real key with #🇳🇱Ne fragment", realUserKey],
+  ['fragment label after #', `${vmess(baseConfig)}#label`],
+  ['fragment with spaces after #', `${vmess(baseConfig)}#name with spaces`],
+  ['no fragment (no regression)', vmess(baseConfig)],
 ];
 
 const invalidUrls = [
@@ -118,5 +128,23 @@ describe('validateVmessUrl', () => {
 
   it('confirms the "+"-containing base64 fixture really contains "+"', () => {
     expect(plusB64).toContain('+');
+  });
+
+  it("validates the user's real #🇳🇱Ne-fragment key", () => {
+    const res = validateVmessUrl(realUserKey);
+    expect(res.valid).toBe(true);
+    expect(res.message).toBe('Valid');
+  });
+
+  it('strips a fragment with spaces (whitespace check runs on base64 only)', () => {
+    const res = validateVmessUrl(`${vmess(baseConfig)}#name with spaces`);
+    expect(res.valid).toBe(true);
+    expect(res.message).toBe('Valid');
+  });
+
+  it('still rejects whitespace inside the base64 body (no fragment)', () => {
+    const res = validateVmessUrl(`vmess://${b64(baseConfig)} `);
+    expect(res.valid).toBe(false);
+    expect(res.message).toBe('Invalid VMess URL: must not contain spaces');
   });
 });

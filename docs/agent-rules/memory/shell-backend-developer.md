@@ -307,3 +307,26 @@ findings; keep under ~200 lines.
   usage "Available:" line, docker-compose comment. Same name:OK/FAIL parse + the
   subshell-pipe PASS-counter quirk as test_subscription (suite `Results:` total
   omits piped-while passes; the per-test ✓ marks are the source of truth).
+
+## task-012: vmess:// '#fragment' strip before base64 decode
+
+- Root cause: the `vmess)` case in `sing_box_config_facade.sh` passes the RAW
+  pre-url_decode link (`$raw_url`, kept that way by task-005 S1 to preserve `+`),
+  which STILL carries the `#fragment` (server display name, e.g. `#🇳🇱Ne`).
+  `vmess_link_to_json` only did `payload="${url#vmess://}"`, so the `#`/emoji/
+  Cyrillic bytes corrupted the base64 → decode failed → fatal. facade:72's
+  `url_strip_fragment` only touched the separate `$url`, NOT `$raw_url`, so the
+  strip MUST live inside `vmess_link_to_json`.
+- Fix (helpers.sh, ONE line): right after `payload="${url#vmess://}"` add
+  `payload="${payload%%#*}"` (POSIX longest-`#…`-suffix strip). Safe because the
+  base64 body never contains `#`; fragment-less payload = no-op. Existing
+  whitespace-strip (`tr -d ' \011\012\015'`, NOT `[:space:]`) + `=` pad loop +
+  `base64_decode` run unchanged on the fragment-free payload. Did NOT touch the
+  facade / reintroduce url_decode. VMess canonical name still comes from JSON
+  `ps`; we only drop the fragment, do not adopt it as the name.
+- Smoke: extended the existing vmess facade block in `test_sing_box_config` (`sb`
+  category — no new top-level test/registration) with a `vmess-frag-*` case:
+  `vmess://<base64(JSON)>#🇳🇱Ne`, sanity-check the link has `#`, then assert
+  server/uuid/transport/tls on the generated outbound. The existing ws/tcp/plus
+  cases (no `#`) double as the no-fragment regression. shellcheck -S error clean;
+  `all` = 76 passed / 0 failed.
