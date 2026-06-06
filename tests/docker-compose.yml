@@ -1,24 +1,27 @@
 # ──────────────────────────────────────────────────────────────────
-# Padkap Evolution — Docker Compose Test Environment
+# Netshift Evolution — Docker Compose Test Environment
 #
 # Launch:
 #   docker compose -f tests/docker-compose.yml build
 #   docker compose -f tests/docker-compose.yml up
 #
 # Run specific test:
-#   docker compose -f tests/docker-compose.yml run --rm padkap-test <test-name>
+#   docker compose -f tests/docker-compose.yml run --rm netshift-test <test-name>
 #
-# Test names: all, deps, syntax, config, helpers, nft,
-#             dnsmasq, lifecycle, diagnostics, subscription
+# Test names: all, deps, syntax, config, helpers, jq, cm, sb, nft,
+#             diagnostics, subscription, rejected, jobstate, selfheal,
+#             dnsdetour
 # ──────────────────────────────────────────────────────────────────
 
 services:
-  padkap-test:
+  netshift-test:
     build:
       context: ..
       dockerfile: tests/Dockerfile
-    image: padkap-evolution:test
-    container_name: padkap-test
+      args:
+        - NETSHIFT_VERSION=test
+    image: netshift-evolution:test
+    container_name: netshift-test
     hostname: OpenWrt
 
     # ── Kernel capabilities for nftables ────────────────────────
@@ -38,13 +41,13 @@ services:
 
     # ── Volumes (source code bind mount) ─────────────────────────
     volumes:
-      - ../padkap/files:/padkap/files:ro
+      - ../netshift/files:/netshift/files:ro
       - ./entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
       - ./test-results:/tmp/test-results
 
     # ── Environment ──────────────────────────────────────────────
     environment:
-      - PADKAP_VERSION=test
+      - NETSHIFT_VERSION=test
       - TEST_SKIP_NETWORK=${TEST_SKIP_NETWORK:-0}
       - TEST_VERBOSE=${TEST_VERBOSE:-0}
 

@@ -1,13 +1,13 @@
-# Padkap Evolution — .dockerignore for Docker builds
+# Netshift Evolution — .dockerignore for Docker builds
 # Speed up build context by excluding unnecessary files
 
 # Dependencies
 node_modules/
-fe-app-padkap/node_modules/
-fe-app-padkap/.yarn/
+fe-app-netshift/node_modules/
+fe-app-netshift/.yarn/
 
 # Build artifacts
-fe-app-padkap/dist/
+fe-app-netshift/dist/
 *.ipk
 *.apk
 

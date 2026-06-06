@@ -1,11 +1,11 @@
-FROM itdoginfo/openwrt-sdk-apk:09102025
+FROM itdoginfo/openwrt-sdk-apk:25.12.3
 
-ARG PADKAP_VERSION
-ENV PADKAP_VERSION=${PADKAP_VERSION}
+ARG NETSHIFT_VERSION
+ENV NETSHIFT_VERSION=${NETSHIFT_VERSION}
 
-COPY ./padkap /builder/package/feeds/utilities/padkap
-COPY ./luci-app-padkap /builder/package/feeds/luci/luci-app-padkap
+COPY ./netshift /builder/package/feeds/utilities/netshift
+COPY ./luci-app-netshift /builder/package/feeds/luci/luci-app-netshift
 
 RUN make defconfig && \
-    make package/padkap/compile -j1 V=s && \
-    make package/luci-app-padkap/compile -j1 V=s
+    make package/netshift/compile -j4 V=s && \
+    make package/luci-app-netshift/compile -j4 V=s

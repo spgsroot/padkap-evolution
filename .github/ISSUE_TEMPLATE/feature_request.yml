@@ -1,6 +1,6 @@
 ---
 name: ✨ Запрос новой функции
-description: Предложите новую функцию или улучшение для Padkap
+description: Предложите новую функцию или улучшение для NetShift
 title: "[FEATURE] "
 labels: ["enhancement", "needs-discussion"]
 assignees: []
@@ -11,8 +11,8 @@ body:
         Спасибо за предложение новой функции!
         
         Перед отправкой, пожалуйста:
-        - Проверьте [существующие запросы](https://github.com/spgsroot/padkap-evolution/issues?q=is%3Aissue+label%3Aenhancement)
-        - Убедитесь, что функции не существует в [документации](https://github.com/spgsroot/padkap-evolution#readme)
+        - Проверьте [существующие запросы](https://github.com/yandexru45/netshift/issues?q=is%3Aissue+label%3Aenhancement)
+        - Убедитесь, что функции не существует в [документации](https://podkop.net)
 
   - type: textarea
     id: summary
@@ -40,7 +40,7 @@ body:
       label: 💡 Предлагаемое решение
       description: Четкое и краткое описание того, что вы хотите реализовать
       placeholder: |
-        Я хочу, чтобы Padkap мог [...]
+        Я хочу, чтобы NetShift мог [...]
         Предлагаю добавить функцию, которая [...]
         Можно было бы улучшить [...] путем [...]
     validations:

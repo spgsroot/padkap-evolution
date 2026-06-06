@@ -1,308 +1,229 @@
-# Padkap Evolution
+<div align="center">
 
-[![OpenWrt Smoke Tests](https://github.com/spgsroot/padkap-evolution/actions/workflows/openwrt-smoke-tests.yml/badge.svg)](https://github.com/spgsroot/padkap-evolution/actions/workflows/openwrt-smoke-tests.yml)
-[![Build packages](https://github.com/spgsroot/padkap-evolution/actions/workflows/build.yml/badge.svg)](https://github.com/spgsroot/padkap-evolution/actions/workflows/build.yml)
+# NetShift
 
-> **Модифицированная сборка с расширенной функциональностью для OpenWrt**
->
-> Маршрутизация трафика по доменам и подсетям на роутерах OpenWrt через sing-box.
-> Добавлена поддержка подписок (HWID), глобального прокси, блокировки DoH, IPv6,
-> фонового мониторинга с автовосстановлением и полной маршрутизации на уровне sing-box.
+<p align="center">
+  <img src="./docs/icon.png" alt="Clash" width="128" />
+  <br>
+  <br>
+  <a href="https://github.com/yandexru45/netshift/releases">
+    <img src="https://img.shields.io/github/release/yandexru45/netshift/all.svg">
+  </a>
+</p>
+<h3 align="center"><a href="https://github.com/sagernet/sing-box">Sing-box</a> client for Openwrt</h3>
+</div>
+
+---
+<p align="center">
+  <a href="https://t.me/netshift_news"><img src="https://img.shields.io/badge/Telegram-Channel-Link?style=for-the-badge&logo=Telegram&logoColor=white&logoSize=auto&color=blue" alt="Telegram Channel" /></a>
+  <a href="https://t.me/netshift_chat"><img src="https://img.shields.io/badge/Telegram-Chat-yes?style=for-the-badge&logo=Telegram&logoColor=white&logoSize=auto&color=blue" alt="Telegram Chat" /></a>
+</p>
 
 ---
 
-## Что нового в этом форке
+**NetShift** - маршрутизатор трафика для OpenWrt. Направляйте нужные ресурсы в туннель, а остальное - напрямую. Открытое ПО на базе [sing-box](https://github.com/SagerNet/sing-box).
 
-| Фича | Описание |
-|------|----------|
-| **Подписки (Subscription)** | URL подписки от прокси-провайдера с HWID-авторизацией и автообновлением |
-| **Полная маршрутизация через sing-box** | Весь LAN-трафик идёт через sing-box TProxy, все решения о маршрутизации — в sing-box rulesets |
-| **Фоновый мониторинг** | После старта padkap следит за sing-box; при краше — восстанавливает DNS и перезапускает с экспоненциальной отсрочкой |
-| **Блокировка DoH** | Тоггл для блокировки прямых подключений к публичным DoH-серверам (Cloudflare, Google, Quad9, AdGuard, OpenDNS, Yandex) |
-| **Поддержка IPv6** | IPv6-правила nftables, TProxy, FakeIP, DNS (AAAA-записи), IPv6-валидаторы на фронтенде |
-| **Global Proxy** | Режим «всё через прокси, кроме списка исключений» — обратная модель маршрутизации |
-| **Docker-тестирование** | Контейнер OpenWrt rootfs для smoke-тестов перед загрузкой на роутер |
+Это форк [itdoginfo/podkop](https://github.com/itdoginfo/podkop), значительно расширяющий функциональность.
+
+> [!WARNING]
+> Проект находится в стадии бета-версии. Возможны ошибки, нестабильная работа и существенные изменения функциональности.
 
 ---
 
-## Требования
+## Функции
 
-- **OpenWrt 24.10** или новее (23.05 не поддерживается)
-- **Минимум 25 МБ** свободного места на разделе overlay
-- Установленный `sing-box` (>= 1.12.0)
-- Отсутствие конфликтующих пакетов: `https-dns-proxy`, `nextdns`, `luci-app-passwall`
+- [x] **Маршрутизация по доменам и подсетям** - нужное в туннель, остальное напрямую<br><sub>VLESS · Shadowsocks · Trojan · Hysteria2 · готовые community-списки</sub>
+- [x] **Subscription URL** - ссылки подписки от провайдера с автообновлением и автовыбором лучшего сервера<br><sub>любая подписка remnawave · 3x-ui · marzban · github</sub>
+- [x] **Переключаемое ядро sing-box** - стабильное ↔ sing-box-extended прямо из веб-интерфейса<br><sub>клиентский транспорт xhttp · установка и откат в один клик</sub>
+- [x] **Веб-интерфейс LuCI** - дашборд, диагностика и настройки без ручной правки конфигов<br><sub>статус серверов · проверка соединения · логи</sub>
+- [x] **Автоматическая миграция** - обновление со старого podkop переносит конфиг без перенастройки
+
 
 ---
 
-## Установка
+<div align="center">
 
-Установщик всегда берёт последние `.ipk`/`.apk` пакеты из **GitHub Releases** этого форка:
+<img src="docs/screenshot.png" alt="NetShift в LuCI" width="800" />
+
+</div>
+
+---
+
+## Вещи, которые необходимо знать перед установкой
+
+<details open>
+<summary><b>Системные требования</b></summary>
+
+- OpenWrt **24.10** или выше.
+- Минимум **25 МБ** свободного места. Устройства с флеш-памятью 16 МБ не поддерживаются.
+
+</details>
+
+<details>
+<summary><b>Обновления и конфигурация</b></summary>
+
+- При обновлении **обязательно** [очищайте кэш LuCI](https://podkop.net/docs/clear-browser-cache/).
+- После обновления проверяйте конфигурацию - она может меняться между версиями.
+- При старте NetShift модифицирует конфигурацию Dnsmasq.
+- NetShift изменяет конфигурацию sing-box. Если используете собственную - заранее сохраните её.
+
+</details>
+
+<details>
+<summary><b>Ограничения и особенности</b></summary>
+
+- Если установлен **Getdomains**, его [необходимо удалить](https://github.com/itdoginfo/domain-routing-openwrt?tab=readme-ov-file#скрипт-для-удаления).
+- **Dashboard** работает только по HTTP (особенность Clash API). По HTTPS или через домен может быть недоступен.
+
+</details>
+
+<details>
+<summary><b>Поддержка и диагностика</b></summary>
+
+- [Руководство по диагностике](https://podkop.net/docs/diagnostics/)
+- Актуальные изменения - в [Telegram-чате](https://t.me/netshift_chat/2) (читайте закреплённые сообщения).
+- При проблемах оставляйте технически грамотный фидбэк в GitHub Issues и Telegram-чате.
+
+</details>
+
+<details>
+<summary><b>Миграция с podkop (0.8.0) и смена формата конфига (0.7.0)</b></summary>
+
+**0.8.0 - переименование в NetShift.** Пакет теперь `netshift` (бинарь `/usr/bin/netshift`), конфиг - `/etc/config/netshift`, LuCI-приложение - `luci-app-netshift`. При обновлении старый конфиг `/etc/config/podkop` автоматически мигрируется в `/etc/config/netshift`, резервная копия сохраняется в `/etc/config/podkop.bak.pre-netshift`. туннель продолжит работать без перенастройки.
+
+**0.7.0 - несовместимый формат конфига.** Старые значения несовместимы - нужно настроить заново. Скрипт установки обнаружит старую версию и предложит сделать это автоматически. Вручную:
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/spgsroot/padkap-evolution/refs/heads/main/install.sh)
+mv /etc/config/netshift /etc/config/netshift-070
+wget -O /etc/config/netshift https://raw.githubusercontent.com/yandexru45/netshift/refs/heads/main/netshift/files/etc/config/netshift
+# затем настроить заново через LuCI или UCI
 ```
 
-Скрипт установит:
-- `padkap` — основной пакет
-- `luci-app-padkap` — веб-интерфейс LuCI
-- `luci-i18n-padkap-ru` — русская локализация (опционально)
+</details>
 
-После установки откройте LuCI → **Services → Padkap** и настройте секции.
+## Установка NetShift
 
-> Если релиза ещё нет или GitHub API недоступен, установщик завершится с ошибкой и покажет ссылку на страницу релизов.
+Полная инструкция - в [документации](https://podkop.net/docs/install/).
 
----
-
-## Первый запуск
-
-### Через LuCI (рекомендуется)
-
-1. **Services → Padkap → Sections** — создайте секцию прокси
-2. Выберите **Connection Type** = `Proxy`, **Configuration Type** = `Subscription` (или `Connection URL`)
-3. Введите URL подписки или строку подключения
-4. На вкладке **Settings** настройте DNS и сетевой интерфейс
-5. Нажмите **Save & Apply**
-
-### Через UCI (командная строка)
+Для установки и обновления достаточно одного скрипта:
 
 ```sh
-# Базовая настройка: прокси через подписку
-uci set padkap.my_proxy=section
-uci set padkap.my_proxy.connection_type='proxy'
-uci set padkap.my_proxy.proxy_config_type='subscription'
-uci set padkap.my_proxy.subscription_url='https://your-provider.com/api/sub'
-uci set padkap.my_proxy.subscription_update_interval='1h'
-uci add_list padkap.my_proxy.community_lists='russia_inside'
-uci commit padkap
-
-# Применить и запустить
-/usr/bin/padkap start
+sh <(wget -O - https://raw.githubusercontent.com/yandexru45/netshift/refs/heads/main/install.sh)
 ```
 
----
+Интерфейс появится в LuCI: **Services → NetShift**.
 
-## Настройка
-
-### Подписки (Subscription)
-
-При выборе `proxy_config_type = subscription` доступны опции:
-
-| Опция | Значения | Описание |
-|-------|----------|----------|
-| `subscription_url` | URL | Ссылка подписки от провайдера |
-| `subscription_update_interval` | `30m`, `1h`, `3h`, `6h`, `12h`, `1d` | Интервал автообновления |
-| `subscription_group_by_countries` | `0`/`1` | Группировка серверов по флагам стран |
+<details>
+<summary><b>Настройка подписки (Subscription URL) через UCI</b></summary>
 
 При скачивании подписки отправляются заголовки:
-```
-User-Agent: singbox/<версия>
-X-HWID: xxxx-xxxx-xxxx-xxxx       # детерминированный ID роутера
-X-Device-OS: OpenWrt Linux
-X-Device-Model: <модель роутера>
-X-Ver-OS: <версия ядра>
+
+| Заголовок | Значение |
+|---|---|
+| `User-Agent` | `singbox/<версия>` |
+| `X-HWID` | уникальный идентификатор роутера |
+| `X-Device-OS` | `OpenWrt Linux` |
+| `X-Device-Model` | модель роутера |
+| `X-Ver-OS` | версия ядра |
+
+```sh
+uci set netshift.my_sub=section
+uci set netshift.my_sub.connection_type='proxy'
+uci set netshift.my_sub.proxy_config_type='subscription'
+uci set netshift.my_sub.subscription_url='https://your-provider.com/api/sub'
+uci set netshift.my_sub.subscription_update_interval='1h'
+uci add_list netshift.my_sub.community_lists='russia_inside'
+uci commit netshift
 ```
 
 Ручное обновление подписки:
-```sh
-/usr/bin/padkap subscription_update
-```
-
-### Global Proxy — всё через прокси
-
-Режим при котором **весь несовпадающий трафик** идёт через выбранный прокси,
-а указанные списки (exclusion) — напрямую.
-
-1. Создайте прокси-секцию (proxy/VPN) → включите **Global Proxy**
-2. Создайте **exclusion**-секцию → добавьте списки доменов/подсетей для исключения
-
-```
-Все запросы → proxy-out (глобальный)
-    .ru → direct-out (exclusion)
-    локальные IP → direct-out (localv4/localv6)
-```
-
-Пример: «всё через прокси, кроме российских сайтов»
-```sh
-# Глобальный прокси
-uci set padkap.global_out=section
-uci set padkap.global_out.connection_type='proxy'
-uci set padkap.global_out.proxy_config_type='subscription'
-uci set padkap.global_out.subscription_url='https://example.com/sub'
-uci set padkap.global_out.global_proxy='1'
-uci commit padkap
-
-# Исключение: .ru идёт напрямую
-uci set padkap.ru_direct=section
-uci set padkap.ru_direct.connection_type='exclusion'
-uci add_list padkap.ru_direct.community_lists='russia_inside'
-uci commit padkap
-```
-
-### Блокировка DoH-серверов
-
-Предотвращает обход DNS-фильтрации роутера приложениями с собственным DoH.
-
-**Settings → Block DoH Servers** — включите тоггл.
-
-Блокируются прямые подключения к IP публичных DoH-серверов:
-Cloudflare (`1.1.1.1`, `1.0.0.1`), Google (`8.8.8.8`, `8.8.4.4`),
-Quad9 (`9.9.9.9`, `9.9.9.11`), OpenDNS, AdGuard, Yandex.
-
-> ⚠️ Если ваш upstream DNS настроен на DoH (`dns_type = doh`), переключите его на
-> UDP или DoT перед включением блокировки, иначе ваши собственные DNS-запросы
-> тоже будут заблокированы.
-
-### Мониторинг и автовосстановление
-
-После успешного старта padkap форкает фоновый монитор, который:
-
-1. Проверяет процесс sing-box каждые **10 секунд**
-2. При краше — **немедленно восстанавливает DNS** (dnsmasq)
-3. Пытается перезапустить sing-box с экспоненциальной отсрочкой:
-   - 10с → 20с → 40с → 80с → 160с (максимум 300с)
-4. После **5 последовательных крашей** — прекращает попытки, оставляет DNS восстановленным
-
-Логи мониторинга:
-```sh
-logread | grep "monitor\|crash\|recovery"
-```
-
-### Ручное управление
 
 ```sh
-/usr/bin/padkap start          # Запуск
-/usr/bin/padkap stop           # Остановка
-/usr/bin/padkap restart        # Перезапуск
-/usr/bin/padkap reload         # Перезагрузка конфига
-/usr/bin/padkap subscription_update  # Обновить подписку
-/usr/bin/padkap global_check   # Полная диагностика
+/usr/bin/netshift subscription_update
 ```
 
----
+</details>
 
-## Тестирование (Docker)
+<details>
+<summary><b>Ядро sing-box-extended (xhttp)</b></summary>
 
-Smoke-тесты позволяют проверить работоспособность форка **до загрузки на роутер**:
+Переключение ядра между стабильным sing-box и сборкой **sing-box-extended** прямо из вкладки **Diagnostics** в LuCI:
+
+- **Install extended** - установить расширенное ядро sing-box-extended.
+- **Install stable** - вернуться на стабильное ядро.
+
+После установки расширенного ядра становится доступен клиентский транспорт **xhttp** (только клиентский режим, не серверный). По умолчанию ставится стабильное ядро - extended включается по желанию.
+
+</details>
+
+## Project Structure
+
+```
+.
+├── netshift/                       # Бэкенд-пакет (POSIX ash + jq)
+│   ├── Makefile                    # Описание OpenWrt-пакета
+│   └── files/
+│       ├── etc/config/netshift     # UCI-конфиг по умолчанию
+│       ├── etc/init.d/netshift     # procd init-скрипт
+│       └── usr/
+│           ├── bin/netshift        # Точка входа CLI (диспетчер команд)
+│           └── lib/                # constants, helpers, nft, rulesets,
+│                                   #   sing_box_config_*, updater, logging
+│
+├── luci-app-netshift/              # LuCI веб-интерфейс
+│   ├── Makefile
+│   ├── htdocs/.../view/netshift/   # main.js (автоген) + hand-written views
+│   ├── po/                         # Переводы (генерируются из fe-app)
+│   └── root/                       # menu.d · acl.d · uci-defaults
+│
+├── fe-app-netshift/                # TypeScript-исходник для main.js (tsup)
+│   ├── src/netshift/               # fetchers · methods · services · tabs
+│   ├── src/{validators,helpers,icons,partials}
+│   └── locales/                    # Исходные переводы (netshift.pot / .po)
+│
+├── sdk/                            # Базовые образы OpenWrt SDK
+├── Dockerfile-ipk · Dockerfile-apk # Сборка пакетов
+└── install.sh                      # Установщик + миграция с podkop
+```
+
+## Build Artifacts
+
+Пакеты собираются в Docker-образе OpenWrt SDK (24.10) и публикуются как релиз при push git-тега ([`.github/workflows/build.yml`](.github/workflows/build.yml)).
+
+| Пакет | Формат | Назначение |
+|---|---|---|
+| `netshift` | `.ipk` / `.apk` | Бэкенд: CLI, init-скрипт, библиотеки, UCI-конфиг |
+| `luci-app-netshift` | `.ipk` / `.apk` | Веб-интерфейс LuCI |
+| `luci-i18n-netshift-ru` | `.ipk` / `.apk` | Русская локализация интерфейса |
+
+Локальная сборка:
 
 ```sh
-# Сборка и полный прогон тестов
-docker compose -f tests/docker-compose.yml up --build
+# ipk (большинство устройств OpenWrt 24.10)
+docker build -f Dockerfile-ipk --build-arg NETSHIFT_VERSION=0.8.0 -t netshift:ipk .
 
-# Отдельные тесты
-docker compose -f tests/docker-compose.yml run --rm padkap-test deps
-docker compose -f tests/docker-compose.yml run --rm padkap-test syntax
-docker compose -f tests/docker-compose.yml run --rm padkap-test helpers
-docker compose -f tests/docker-compose.yml run --rm padkap-test nft
-docker compose -f tests/docker-compose.yml run --rm padkap-test subscription
-
-# Без запуска сети (если нет интернета в контейнере)
-TEST_SKIP_NETWORK=1 docker compose -f tests/docker-compose.yml up --build
+# apk (новые сборки OpenWrt на apk)
+docker build -f Dockerfile-apk --build-arg NETSHIFT_VERSION=0.8.0 -t netshift:apk .
 ```
 
-Контейнер базируется на `openwrt/rootfs:x86-64`, устанавливает все зависимости
-и прогоняет smoke-тесты: синтаксис shell-скриптов, валидацию конфигов,
-генерацию sing-box JSON, jq-пайплайны, nftables, хелперы, парсинг подписок.
+> Требуется sing-box >= 1.12.0 и jq >= 1.7.1 на целевом устройстве.
 
-> **Ограничения контейнера**: TProxy и полный runtime sing-box требуют
-> реального ядра с `kmod-nft-tproxy` — в Docker они недоступны.
+## Star History
 
-### CI/CD
+<a href="https://www.star-history.com/#yandexru45/netshift&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=yandexru45/netshift&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=yandexru45/netshift&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=yandexru45/netshift&type=Date" />
+ </picture>
+</a>
 
-В форке настроены GitHub Actions:
+## Credits
 
-| Workflow | Когда запускается | Что делает |
-|----------|-------------------|------------|
-| `OpenWrt Smoke Tests` | push/PR, изменения в `padkap/**`, `tests/**`, `install.sh`, workflows | Собирает OpenWrt rootfs Docker-контейнер и запускает `tests/entrypoint.sh all` |
-| `Build packages` | push tag (`v*`/любой tag) | Сначала запускает smoke-тесты, затем собирает `.ipk` и `.apk`, публикует GitHub Release |
-| `Frontend CI` | PR с изменениями `fe-app-padkap/**` | format/lint/test/build frontend |
-| `Differential ShellCheck` | push/PR shell-файлов | ShellCheck по изменённым строкам |
+- [itdoginfo/podkop](https://github.com/itdoginfo/podkop) - исходный проект, форком которого является NetShift.
+- [sing-box](https://github.com/SagerNet/sing-box) - движок маршрутизации.
 
-Локальный тест перед релизом:
+Лицензия: **GPL-2.0-or-later** - см. [LICENSE](LICENSE).
 
-```sh
-docker compose -f tests/docker-compose.yml up --build
-```
-
-Ожидаемый результат:
-
-```text
-Results: 42 passed / 0 failed
-✓ ALL TESTS PASSED
-```
-
-### Создание релиза
-
-Релиз создаётся тегом. Пример:
-
-```sh
-git tag v0.8.0
-git push origin v0.8.0
-```
-
-После пуша тега workflow `Build packages`:
-1. прогонит OpenWrt smoke-тесты;
-2. соберёт пакеты `padkap`, `luci-app-padkap`, `luci-i18n-padkap-ru` для IPK/APK;
-3. создаст GitHub Release с артефактами.
-
----
-
-## Диагностика
-
-```sh
-# Статус sing-box
-/usr/bin/padkap get_sing_box_status
-
-# Статус padkap
-/usr/bin/padkap get_status
-
-# Показать конфиг sing-box
-/usr/bin/padkap show_sing_box_config
-
-# Полная проверка системы
-/usr/bin/padkap global_check
-
-# Проверка DNS
-/usr/bin/padkap check_dns_available
-```
-
-Dashboard доступен через LuCI на вкладке **Dashboard** (только по HTTP,
-из-за особенностей Clash API). Показывает графики трафика, список прокси-серверов,
-задержки и ручное переключение между outbound'ами.
-
----
-
-## Обновление с версии 0.7.0
-
-Начиная с версии 0.7.0 изменена структура конфига. Установщик обнаружит старую
-версию и предложит автоматическую миграцию.
-
-При ручном обновлении:
-
-```sh
-# 1. Бэкап старого конфига
-mv /etc/config/padkap /etc/config/padkap-070
-
-# 2. Новый дефолтный конфиг
-wget -O /etc/config/padkap \
-  https://raw.githubusercontent.com/spgsroot/padkap-evolution/refs/heads/main/padkap/files/etc/config/padkap
-
-# 3. Настроить заново через LuCI или UCI
-```
-
----
-
-## ToDo
-
-- [ ] Unit тесты (BATS)
-- [ ] Интеграционные тесты (OpenWrt rootfs + BATS)
-
----
-
-## Обратная связь
-
-- **Issues**: [github.com/spgsroot/padkap-evolution/issues](https://github.com/spgsroot/padkap-evolution/issues)
-- **TG-чат**: [t.me/itdogchat](https://t.me/itdogchat/81758/420321)
-
----
-https://github.com/itdoginfo/podkop/blob/main/TRADEMARK.md
-Based on Podkop open-source software
+> [!IMPORTANT]
+> Pull Request принимаются только после согласования с авторами в [Telegram-чате](https://t.me/netshift_chat/17).
