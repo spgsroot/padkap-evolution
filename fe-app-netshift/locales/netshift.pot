@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: NETSHIFT\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-06 19:26+0300\n"
-"PO-Revision-Date: 2026-06-06 19:26+0300\n"
+"POT-Creation-Date: 2026-06-06 21:27+0300\n"
+"PO-Revision-Date: 2026-06-06 21:27+0300\n"
 "Last-Translator: spgsroot, yandexru45 <>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "Language: \n"
@@ -36,7 +36,7 @@ msgstr ""
 msgid "Active Connections"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:106
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:99
 msgid "Additional marking rules found"
 msgstr ""
 
@@ -791,7 +791,7 @@ msgstr ""
 msgid "Network Interface"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:105
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:98
 msgid "No other marking rules found"
 msgstr ""
 
@@ -925,27 +925,23 @@ msgstr ""
 msgid "Routing Excluded IPs"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:79
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:77
 msgid "Rules mangle counters"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:74
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:72
 msgid "Rules mangle exist"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:89
-msgid "Rules mangle output counters"
-msgstr ""
-
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:84
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:82
 msgid "Rules mangle output exist"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:99
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:92
 msgid "Rules proxy counters"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:94
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:87
 msgid "Rules proxy exist"
 msgstr ""
 
@@ -1160,7 +1156,7 @@ msgstr ""
 msgid "System information"
 msgstr ""
 
-#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:69
+#: src/netshift/tabs/diagnostic/checks/runNftCheck.ts:67
 msgid "Table exist"
 msgstr ""
 

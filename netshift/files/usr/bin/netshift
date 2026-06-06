@@ -3537,7 +3537,6 @@ check_nft_rules() {
     local rules_mangle_exist=0
     local rules_mangle_counters=0
     local rules_mangle_output_exist=0
-    local rules_mangle_output_counters=0
     local rules_proxy_exist=0
     local rules_proxy_counters=0
     local rules_other_mark_exist=0
@@ -3575,10 +3574,6 @@ check_nft_rules() {
             mangle_output_output=$(nft list chain inet "$NFT_TABLE_NAME" mangle_output)
             if echo "$mangle_output_output" | grep -q "counter"; then
                 rules_mangle_output_exist=1
-
-                if echo "$mangle_output_output" | grep "counter" | grep -qv "packets 0 bytes 0"; then
-                    rules_mangle_output_counters=1
-                fi
             fi
         fi
 
@@ -3613,7 +3608,7 @@ check_nft_rules() {
         rm -f /tmp/netshift_mark_check.$$
     fi
 
-    echo "{\"table_exist\":$table_exist,\"rules_mangle_exist\":$rules_mangle_exist,\"rules_mangle_counters\":$rules_mangle_counters,\"rules_mangle_output_exist\":$rules_mangle_output_exist,\"rules_mangle_output_counters\":$rules_mangle_output_counters,\"rules_proxy_exist\":$rules_proxy_exist,\"rules_proxy_counters\":$rules_proxy_counters,\"rules_other_mark_exist\":$rules_other_mark_exist}" | jq .
+    echo "{\"table_exist\":$table_exist,\"rules_mangle_exist\":$rules_mangle_exist,\"rules_mangle_counters\":$rules_mangle_counters,\"rules_mangle_output_exist\":$rules_mangle_output_exist,\"rules_proxy_exist\":$rules_proxy_exist,\"rules_proxy_counters\":$rules_proxy_counters,\"rules_other_mark_exist\":$rules_other_mark_exist}" | jq .
 }
 
 check_sing_box() {
@@ -4005,13 +4000,12 @@ global_check() {
     nft_check_json=$(check_nft_rules)
 
     if [ -n "$nft_check_json" ]; then
-        local table_exist rules_mangle_exist rules_mangle_counters rules_mangle_output_exist rules_mangle_output_counters rules_proxy_exist rules_proxy_counters rules_other_mark_exist
+        local table_exist rules_mangle_exist rules_mangle_counters rules_mangle_output_exist rules_proxy_exist rules_proxy_counters rules_other_mark_exist
 
         table_exist=$(echo "$nft_check_json" | jq -r '.table_exist // 0')
         rules_mangle_exist=$(echo "$nft_check_json" | jq -r '.rules_mangle_exist // 0')
         rules_mangle_counters=$(echo "$nft_check_json" | jq -r '.rules_mangle_counters // 0')
         rules_mangle_output_exist=$(echo "$nft_check_json" | jq -r '.rules_mangle_output_exist // 0')
-        rules_mangle_output_counters=$(echo "$nft_check_json" | jq -r '.rules_mangle_output_counters // 0')
         rules_proxy_exist=$(echo "$nft_check_json" | jq -r '.rules_proxy_exist // 0')
         rules_proxy_counters=$(echo "$nft_check_json" | jq -r '.rules_proxy_counters // 0')
         rules_other_mark_exist=$(echo "$nft_check_json" | jq -r '.rules_other_mark_exist // 0')
@@ -4038,12 +4032,6 @@ global_check() {
             print_global "✅ Rules mangle output exist"
         else
             print_global "❌ Rules mangle output exist"
-        fi
-
-        if [ "$rules_mangle_output_counters" -eq 1 ]; then
-            print_global "✅ Rules mangle output counters"
-        else
-            print_global "⚠️  Rules mangle output counters"
         fi
 
         if [ "$rules_proxy_exist" -eq 1 ]; then

@@ -183,7 +183,6 @@ export namespace NetShift {
     rules_mangle_exist: 0 | 1;
     rules_mangle_counters: 0 | 1;
     rules_mangle_output_exist: 0 | 1;
-    rules_mangle_output_counters: 0 | 1;
     rules_proxy_exist: 0 | 1;
     rules_proxy_counters: 0 | 1;
     rules_other_mark_exist: 0 | 1;

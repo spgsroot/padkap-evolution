@@ -38,7 +38,7 @@
     "call": "Additional marking rules found",
     "key": "Additional marking rules found",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:106"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:99"
     ]
   },
   {
@@ -1330,7 +1330,7 @@
     "call": "No other marking rules found",
     "key": "No other marking rules found",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:105"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:98"
     ]
   },
   {
@@ -1554,42 +1554,35 @@
     "call": "Rules mangle counters",
     "key": "Rules mangle counters",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:79"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:77"
     ]
   },
   {
     "call": "Rules mangle exist",
     "key": "Rules mangle exist",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:74"
-    ]
-  },
-  {
-    "call": "Rules mangle output counters",
-    "key": "Rules mangle output counters",
-    "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:89"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:72"
     ]
   },
   {
     "call": "Rules mangle output exist",
     "key": "Rules mangle output exist",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:84"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:82"
     ]
   },
   {
     "call": "Rules proxy counters",
     "key": "Rules proxy counters",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:99"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:92"
     ]
   },
   {
     "call": "Rules proxy exist",
     "key": "Rules proxy exist",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:94"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:87"
     ]
   },
   {
@@ -1963,7 +1956,7 @@
     "call": "Table exist",
     "key": "Table exist",
     "places": [
-      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:69"
+      "src/netshift/tabs/diagnostic/checks/runNftCheck.ts:67"
     ]
   },
   {

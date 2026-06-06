@@ -353,3 +353,28 @@ append findings; keep under ~200 lines.
   direct path → no leak). `tsc --noEmit` flags ONE pre-existing error in
   `getNetshiftVersionRow.test.ts` (sing_box_extended optionality) — NOT in CI
   (yarn ci = format/lint/vitest/build, no tsc), pre-existing, ignore.
+
+## Drop stale nft "mangle output counters" check (task-020b)
+
+- Backend 020a removed `rules_mangle_output_counters` from `check_nft` JSON
+  (router-output traffic is intentionally DIRECT now → that chain's counter is
+  legitimately 0, so the non-zero assertion was a FALSE positive). New STABLE
+  7-key shape: `{table_exist, rules_mangle_exist, rules_mangle_counters,
+  rules_mangle_output_exist, rules_proxy_exist, rules_proxy_counters,
+  rules_other_mark_exist}` — `rules_mangle_output_exist` KEPT.
+- FE removal touched exactly 2 source files: `runNftCheck.ts` (drop the field
+  from the allGood `&&` chain, the atLeastOneGood `||` chain, and its `items[]`
+  row — keep the "Rules mangle output exist" row) + `types.ts`
+  `NftRulesCheckResult` (drop `rules_mangle_output_counters: 0 | 1;`).
+- main.js: runtime diff is the removed Boolean()s + the dropped items[] row;
+  second build BYTE-IDENTICAL (idempotent), banner + `return baseclass.extend`
+  intact; `grep -c rules_mangle_output_counters main.js` == 0.
+- locales: ran `node {extract-calls,generate-pot,generate-po ru,
+  distribute-locales}.js` (NOT yarn → no corepack). The unused
+  `_('Rules mangle output counters')` msgid dropped cleanly from ALL 5 catalogs
+  (calls.json, locales/netshift.{pot,ru.po}, po/{templates/netshift.pot,
+  ru/netshift.po}). msgid-level delta = PURELY a removal (1 removed, 0 added);
+  "Rules mangle output exist" stays. generate-po reported 325/323 (2 stale
+  translations retained in source ru.po — harmless, additive-preserving).
+- yarn was classic 1.22.22 → `yarn ci` safe; verified `git diff --exit-code --
+  yarn.lock` clean and NO `.yarn`/`.yarnrc.yml`. No vitest referenced the field.

@@ -580,6 +580,35 @@ findings; keep under ~200 lines.
   — simpler than awk-extract since it's not in bin/netshift. Cases: (1) installed
   == latest, only tag has v → latest + both v-stripped+equal (THE regression);
   (2) installed older → outdated; (3) empty releases → success:false. Registered
-  all 5 points (all)/case/usage/docker-compose comment). shellcheck -S error clean
-  (bin+libs+install.sh); `smoke-tests all` = 104 passed / 0 failed (101 baseline
-  + 3 new). `extcheck` alone = 3/0.
+   all 5 points (all)/case/usage/docker-compose comment). shellcheck -S error clean
+   (bin+libs+install.sh); `smoke-tests all` = 104 passed / 0 failed (101 baseline
+   + 3 new). `extcheck` alone = 3/0.
+
+## task-020a: drop stale "mangle output counters" diagnostic (PR#11 B-02 align)
+
+- The diagnostic function the spec calls `check_nft` is actually named
+  **`check_nft_rules`** in bin/netshift. After PR#11 (router-originated traffic
+  intentionally DIRECT) the `mangle_output` chain's only counter rule
+  (`meta mark 0x00200000 counter return`) is essentially never hit → counter
+  legitimately 0 → the old non-zero-counter assertion produced a FALSE ⚠️.
+  Operator decision Variant A = REMOVE the "mangle output counters" check
+  entirely; KEEP "mangle output exist".
+- Backend fix (bin/netshift ONLY, 6 deletions): in `check_nft_rules` removed the
+  `rules_mangle_output_counters` local, the inner `grep -qv "packets 0 bytes 0"`
+  block that set it, and the key from the emitted JSON echo. In `global_check`
+  removed it from the `local` decl, its `jq -r '.rules_mangle_output_counters //
+  0'` read, and the `if ... ✅/⚠️ Rules mangle output counters` print block.
+  KEPT the existence check (`grep -q "counter" → rules_mangle_output_exist=1`)
+  and its ✅/❌ print. Did NOT touch mangle(prerouting)/proxy/other_mark or
+  `create_nft_rules`.
+- **STABLE check_nft_rules JSON shape (cross-layer contract for frontend 020b),
+  exactly ONE key removed, order otherwise unchanged:** `{table_exist,
+  rules_mangle_exist, rules_mangle_counters, rules_mangle_output_exist,
+  rules_proxy_exist, rules_proxy_counters, rules_other_mark_exist}`.
+- **No smoke test referenced the field** — `tests/entrypoint.sh` has no
+  `test_diagnostics`/nft-check assertion on the check_nft_rules JSON at all (the
+  `nft` category tests rule installation, not the diagnostic JSON keys). So no
+  smoke change and no registration change. Diagnostics-only edit (read-only
+  checks), NOT a routing/config change — nft model unchanged. shellcheck -S error
+  clean; `smoke-tests all` = 104 passed / 0 failed (unchanged baseline); UTF-8
+  intact (iconv round-trip OK, 0 рџ/в”/вЂ mojibake).
