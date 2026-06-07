@@ -27,6 +27,42 @@ updates_log() {
     log "Updater: $message" "$level"
 }
 
+# Verify that a backup copy is byte-complete, guarding the core-swap rollback
+# against a TRUNCATED backup written under tmpfs ENOSPC (busybox `cp` does not
+# reliably return non-zero on a partial write). Returns 0 iff $dst exists and
+# its byte size equals $src's size. A size match is sufficient here: this is a
+# same-machine copy of the same file and we are guarding truncation, not bit-rot
+# — do NOT md5/sha a ~40 MB binary on a slow armv7 router. If $src is absent
+# there is nothing to back up, so verification trivially succeeds (0).
+updates_verify_copy() {
+    local src="$1"
+    local dst="$2"
+    local ssz dsz
+
+    [ -f "$src" ] || return 0
+    [ -f "$dst" ] || return 1
+    ssz="$(wc -c < "$src" 2>/dev/null)" || return 1
+    dsz="$(wc -c < "$dst" 2>/dev/null)" || return 1
+    [ -n "$ssz" ] && [ "$ssz" = "$dsz" ]
+}
+
+# Verify that a stashed backup is still byte-complete BEFORE a rollback restores
+# it over the live path. Compares the backup's current byte size against the
+# expected source size recorded at backup time. Returns 0 iff $backup exists and
+# its size equals $expected_size. Refusing to restore a truncated backup is
+# safer than installing a segfaulting core as the "safe" fallback.
+updates_backup_is_complete() {
+    local backup="$1"
+    local expected_size="$2"
+    local bsz
+
+    [ -n "$backup" ] || return 1
+    [ -f "$backup" ] || return 1
+    [ -n "$expected_size" ] || return 1
+    bsz="$(wc -c < "$backup" 2>/dev/null)" || return 1
+    [ -n "$bsz" ] && [ "$bsz" = "$expected_size" ]
+}
+
 # ── Async component-action job state (jq, atomic) ───────────────────
 #
 # The UI starts long-running component actions (e.g. switching the sing-box
@@ -918,6 +954,7 @@ _updates_install_sing_box_extended_core() {
     local tmp_dir archive releases tag rel asset_url
     local binary_path cronet_path
     local backup_binary="" backup_cronet="" new_version
+    local backup_binary_size="" backup_cronet_size=""
 
     # Interruption-tolerant heal: a run killed mid-flight (e.g. the old rpcd 30s
     # timeout) could leave a non-executable /usr/bin/sing-box behind. Such a
@@ -996,21 +1033,29 @@ _updates_install_sing_box_extended_core() {
     # no room for a second copy of the binary.
     if [ -e /usr/bin/sing-box ]; then
         backup_binary="$tmp_dir/sing-box.backup"
-        if ! cp -p /usr/bin/sing-box "$backup_binary" 2>/dev/null; then
+        # Gate on a byte-complete backup, not just cp's exit code: a partial
+        # write under tmpfs ENOSPC could otherwise pass and later be restored as
+        # a truncated, segfaulting "safe" fallback. Abort here — the live binary
+        # has NOT been touched yet, so the working core is left intact.
+        if ! cp -p /usr/bin/sing-box "$backup_binary" 2>/dev/null ||
+            ! updates_verify_copy /usr/bin/sing-box "$backup_binary"; then
             rm -rf "$tmp_dir"
             updates_log "Failed to backup current sing-box binary" "error"
             echo "{\"success\":false,\"message\":\"Failed to backup current sing-box binary\"}"
             return 1
         fi
+        backup_binary_size="$(wc -c < "$backup_binary" 2>/dev/null)"
     fi
     if [ -n "$cronet_path" ] && [ -e /usr/lib/libcronet.so ]; then
         backup_cronet="$tmp_dir/libcronet.so.backup"
-        if ! cp -p /usr/lib/libcronet.so "$backup_cronet" 2>/dev/null; then
+        if ! cp -p /usr/lib/libcronet.so "$backup_cronet" 2>/dev/null ||
+            ! updates_verify_copy /usr/lib/libcronet.so "$backup_cronet"; then
             rm -rf "$tmp_dir"
             updates_log "Failed to backup current libcronet.so" "error"
             echo "{\"success\":false,\"message\":\"Failed to backup current libcronet.so\"}"
             return 1
         fi
+        backup_cronet_size="$(wc -c < "$backup_cronet" 2>/dev/null)"
     fi
 
     # Free overlay space by removing the live binary BEFORE extracting, then
@@ -1019,7 +1064,16 @@ _updates_install_sing_box_extended_core() {
     rm -f /usr/bin/sing-box
     if ! tar -xzf "$archive" -O "$binary_path" > /usr/bin/sing-box 2>/dev/null || [ ! -s /usr/bin/sing-box ]; then
         rm -f /usr/bin/sing-box
-        [ -n "$backup_binary" ] && mv -f "$backup_binary" /usr/bin/sing-box
+        # Only restore from a backup that is still byte-complete — restoring a
+        # truncated backup would install a segfaulting core as the "safe"
+        # fallback (worse than leaving the path absent).
+        if [ -n "$backup_binary" ]; then
+            if updates_backup_is_complete "$backup_binary" "$backup_binary_size"; then
+                mv -f "$backup_binary" /usr/bin/sing-box
+            else
+                updates_log "Rollback: sing-box backup is corrupt/incomplete; NOT restoring to avoid installing a broken core" "error"
+            fi
+        fi
         rm -rf "$tmp_dir"
         updates_log "Failed to extract sing-box-extended binary (out of space on overlay?)" "error"
         echo "{\"success\":false,\"message\":\"Failed to extract sing-box-extended binary (not enough free space on the router?)\"}"
@@ -1031,8 +1085,20 @@ _updates_install_sing_box_extended_core() {
         rm -f /usr/lib/libcronet.so
         if ! tar -xzf "$archive" -O "$cronet_path" > /usr/lib/libcronet.so 2>/dev/null || [ ! -s /usr/lib/libcronet.so ]; then
             rm -f /usr/bin/sing-box /usr/lib/libcronet.so
-            [ -n "$backup_binary" ] && mv -f "$backup_binary" /usr/bin/sing-box
-            [ -n "$backup_cronet" ] && mv -f "$backup_cronet" /usr/lib/libcronet.so
+            if [ -n "$backup_binary" ]; then
+                if updates_backup_is_complete "$backup_binary" "$backup_binary_size"; then
+                    mv -f "$backup_binary" /usr/bin/sing-box
+                else
+                    updates_log "Rollback: sing-box backup is corrupt/incomplete; NOT restoring to avoid installing a broken core" "error"
+                fi
+            fi
+            if [ -n "$backup_cronet" ]; then
+                if updates_backup_is_complete "$backup_cronet" "$backup_cronet_size"; then
+                    mv -f "$backup_cronet" /usr/lib/libcronet.so
+                else
+                    updates_log "Rollback: libcronet.so backup is corrupt/incomplete; NOT restoring" "error"
+                fi
+            fi
             rm -rf "$tmp_dir"
             updates_log "Failed to extract libcronet.so" "error"
             echo "{\"success\":false,\"message\":\"Failed to extract libcronet.so\"}"
@@ -1049,9 +1115,21 @@ _updates_install_sing_box_extended_core() {
     *extended*) ;;
     *)
         rm -f /usr/bin/sing-box
-        [ -n "$backup_binary" ] && mv -f "$backup_binary" /usr/bin/sing-box
+        if [ -n "$backup_binary" ]; then
+            if updates_backup_is_complete "$backup_binary" "$backup_binary_size"; then
+                mv -f "$backup_binary" /usr/bin/sing-box
+            else
+                updates_log "Rollback: sing-box backup is corrupt/incomplete; NOT restoring to avoid installing a broken core" "error"
+            fi
+        fi
         [ -n "$cronet_path" ] && rm -f /usr/lib/libcronet.so
-        [ -n "$backup_cronet" ] && mv -f "$backup_cronet" /usr/lib/libcronet.so
+        if [ -n "$backup_cronet" ]; then
+            if updates_backup_is_complete "$backup_cronet" "$backup_cronet_size"; then
+                mv -f "$backup_cronet" /usr/lib/libcronet.so
+            else
+                updates_log "Rollback: libcronet.so backup is corrupt/incomplete; NOT restoring" "error"
+            fi
+        fi
         rm -rf "$tmp_dir"
         updates_log "Installed sing-box failed extended validation; previous binary restored" "error"
         echo "{\"success\":false,\"message\":\"Installed sing-box failed extended validation; previous binary restored\"}"
@@ -1122,6 +1200,7 @@ updates_install_sing_box_stable() {
 _updates_install_sing_box_stable_core() {
     local new_version installed=1
     local tmp_dir backup_binary="" backup_cronet=""
+    local backup_binary_size="" backup_cronet_size=""
 
     # Remove stale temp dirs from an interrupted earlier run (tmpfs is small).
     rm -rf /tmp/netshift-sbstable.* 2>/dev/null
@@ -1137,21 +1216,29 @@ _updates_install_sing_box_stable_core() {
     # touches anything, so a failed install can be rolled back to a working core.
     if [ -e "$UPDATES_SING_BOX_BIN" ]; then
         backup_binary="$tmp_dir/sing-box.backup"
-        if ! cp -p "$UPDATES_SING_BOX_BIN" "$backup_binary" 2>/dev/null; then
+        # Gate on a byte-complete backup, not just cp's exit code (busybox cp can
+        # truncate under tmpfs ENOSPC and still return 0). Abort here — the
+        # package manager has not touched the binary yet, so the working core
+        # stays intact.
+        if ! cp -p "$UPDATES_SING_BOX_BIN" "$backup_binary" 2>/dev/null ||
+            ! updates_verify_copy "$UPDATES_SING_BOX_BIN" "$backup_binary"; then
             rm -rf "$tmp_dir"
             updates_log "Failed to backup current sing-box binary" "error"
             echo "{\"success\":false,\"message\":\"Failed to backup current sing-box binary\"}"
             return 1
         fi
+        backup_binary_size="$(wc -c < "$backup_binary" 2>/dev/null)"
     fi
     if [ -e "$UPDATES_LIBCRONET_LIB" ]; then
         backup_cronet="$tmp_dir/libcronet.so.backup"
-        if ! cp -p "$UPDATES_LIBCRONET_LIB" "$backup_cronet" 2>/dev/null; then
+        if ! cp -p "$UPDATES_LIBCRONET_LIB" "$backup_cronet" 2>/dev/null ||
+            ! updates_verify_copy "$UPDATES_LIBCRONET_LIB" "$backup_cronet"; then
             rm -rf "$tmp_dir"
             updates_log "Failed to backup current libcronet.so" "error"
             echo "{\"success\":false,\"message\":\"Failed to backup current libcronet.so\"}"
             return 1
         fi
+        backup_cronet_size="$(wc -c < "$backup_cronet" 2>/dev/null)"
     fi
 
     if command -v apk >/dev/null 2>&1; then
@@ -1179,7 +1266,7 @@ _updates_install_sing_box_stable_core() {
     if [ "$installed" -eq 0 ]; then
         # Package install failed (it may have already removed/half-replaced the
         # binary). Restore the tmpfs backup so a working core remains.
-        updates_stable_rollback "$backup_binary" "$backup_cronet"
+        updates_stable_rollback "$backup_binary" "$backup_cronet" "$backup_binary_size" "$backup_cronet_size"
         rm -rf "$tmp_dir"
         updates_log "Failed to install stable sing-box via package manager; previous binary restored" "error"
         echo "{\"success\":false,\"message\":\"Failed to install stable sing-box (package manager error); previous binary restored\"}"
@@ -1193,7 +1280,7 @@ _updates_install_sing_box_stable_core() {
     # longer be an "extended" build. If it still is, the install did not land —
     # restore the backup so the router keeps a known-good core.
     if is_sing_box_extended "$new_version"; then
-        updates_stable_rollback "$backup_binary" "$backup_cronet"
+        updates_stable_rollback "$backup_binary" "$backup_cronet" "$backup_binary_size" "$backup_cronet_size"
         rm -rf "$tmp_dir"
         updates_log "Stable install reported success but sing-box is still extended ($new_version); previous binary restored" "error"
         echo "{\"success\":false,\"message\":\"sing-box is still the extended build after install; rollback did not take effect (previous binary restored)\"}"
@@ -1217,25 +1304,42 @@ _updates_install_sing_box_stable_core() {
 # Restores the tmpfs backup of /usr/bin/sing-box (and libcronet.so) into place.
 # Used by the stable path when the package install or validation fails so the
 # router never ends core-less. Best-effort; logs the outcome.
+#
+# Args 3/4 are the byte sizes recorded at backup time. The restore is performed
+# ONLY if the backup is still byte-complete (size match) — a truncated backup
+# (tmpfs ENOSPC) is refused rather than restored as a segfaulting core.
 updates_stable_rollback() {
     local backup_binary="$1"
     local backup_cronet="$2"
+    local backup_binary_size="$3"
+    local backup_cronet_size="$4"
 
-    if [ -n "$backup_binary" ] && [ -e "$backup_binary" ]; then
-        rm -f "$UPDATES_SING_BOX_BIN" 2>/dev/null
-        if mv -f "$backup_binary" "$UPDATES_SING_BOX_BIN" 2>/dev/null; then
-            chmod 0755 "$UPDATES_SING_BOX_BIN" 2>/dev/null || true
-            updates_log "Rollback: restored previous sing-box binary from tmpfs backup"
+    if [ -n "$backup_binary" ]; then
+        # Only restore a byte-complete backup: a truncated backup (tmpfs ENOSPC)
+        # would otherwise be installed as a segfaulting "safe" core, which is
+        # worse than not restoring. Surface a loud error and leave the live path.
+        if updates_backup_is_complete "$backup_binary" "$backup_binary_size"; then
+            rm -f "$UPDATES_SING_BOX_BIN" 2>/dev/null
+            if mv -f "$backup_binary" "$UPDATES_SING_BOX_BIN" 2>/dev/null; then
+                chmod 0755 "$UPDATES_SING_BOX_BIN" 2>/dev/null || true
+                updates_log "Rollback: restored previous sing-box binary from tmpfs backup"
+            else
+                updates_log "Rollback: FAILED to restore sing-box binary from backup" "error"
+            fi
         else
-            updates_log "Rollback: FAILED to restore sing-box binary from backup" "error"
+            updates_log "Rollback: sing-box backup is corrupt/incomplete; NOT restoring to avoid installing a broken core" "error"
         fi
     fi
 
-    if [ -n "$backup_cronet" ] && [ -e "$backup_cronet" ]; then
-        rm -f "$UPDATES_LIBCRONET_LIB" 2>/dev/null
-        if mv -f "$backup_cronet" "$UPDATES_LIBCRONET_LIB" 2>/dev/null; then
-            chmod 0644 "$UPDATES_LIBCRONET_LIB" 2>/dev/null || true
-            updates_log "Rollback: restored previous libcronet.so from tmpfs backup"
+    if [ -n "$backup_cronet" ]; then
+        if updates_backup_is_complete "$backup_cronet" "$backup_cronet_size"; then
+            rm -f "$UPDATES_LIBCRONET_LIB" 2>/dev/null
+            if mv -f "$backup_cronet" "$UPDATES_LIBCRONET_LIB" 2>/dev/null; then
+                chmod 0644 "$UPDATES_LIBCRONET_LIB" 2>/dev/null || true
+                updates_log "Rollback: restored previous libcronet.so from tmpfs backup"
+            fi
+        else
+            updates_log "Rollback: libcronet.so backup is corrupt/incomplete; NOT restoring" "error"
         fi
     fi
 }

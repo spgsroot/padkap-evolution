@@ -540,3 +540,128 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   NOT a task-022 defect. When a smoke category uses this pattern, trust the ✓/✗
   marks, not just the "Results: N passed" line; a real gating test needs
   `done < tmpfile`.
+
+## FIRST apk / OpenWrt 25 HARDWARE TEST (2026-06-07, router 192.168.1.101)
+
+- TEST BOX: ssh root@192.168.1.101 (blank pw), OpenWrt **25.12.4**, target
+  sunxi/cortexa7 (arm_cortex-a7_neon-vfpv4, armv7l), **apk-tools 3.0.5**, Orange
+  Pi One, small overlay (98.8M total, ~60M free baseline). It is a SPARE box
+  BEHIND the main gw (its default route = 192.168.1.1, 0 dhcp leases), reached
+  DIRECTLY over LAN — so netshift kill-switch can't lock me out; rescue
+  `/etc/init.d/netshift stop` always reachable. NO base64/openssl/xxd/od on a
+  bare box -> push files with raw `cat > /tmp/f` over ssh (ssh stdin is 8-bit
+  clean); base64-over-ssh FAILS (busybox base64 absent until coreutils-base64
+  dep installs). sha256sum to verify transfer.
+- BUILD: `docker build -f Dockerfile-apk --build-arg NETSHIFT_VERSION=<v> -t
+  netshift-apk:test .`; extract via `docker create`+`docker cp
+  /builder/bin/packages/x86_64/{utilities,luci}/.`. Packages are PKGARCH=all
+  (noarch) so x86_64 SDK output installs on armv7 fine.
+- **BUG #1 (REAL, apk-only, HIGH): apk `mkpkg` REJECTS version strings with a
+  dash in the upstream part.** `apk version --check` rejects `0.8.5-rc1-r1` and
+  `0.8.5-test-904fd64-r1` (rc=1) but accepts `0.8.5-r1`, `0.07062026-r1`,
+  `0.8.5_rc1-r1`. apk treats `-` as the `-rN` release separator. So a
+  NETSHIFT_VERSION with a dash (an RC tag `0.8.5-rc1`, or a `git describe`
+  `0.8.5-11-gHASH`) makes the apk build DIE at `package/.../netshift failed to
+  build` while the IPK build tolerates it (why it never showed on the 24.10/ipk
+  main router). build.yml's normal `git describe --tags --exact-match ||
+  0.$(date)` gives clean numerics so prod releases are usually safe — but ANY
+  dashed tag breaks apk-only. FIX direction (packaging task): sanitize dashes in
+  the apk Dockerfile/Makefile version (`-`→`_` or `.`) OR document the
+  no-dash-tag constraint. Dockerfile-apk passes version RAW (the known ipk-vs-apk
+  v-prefix asymmetry is nearby).
+- INSTALL + RUNTIME CHAIN ON OWRT25/apk = WORKS. `apk update` then `apk add
+  --allow-untrusted /tmp/.../netshift-*.apk` pulled all deps (sing-box 1.12.17,
+  jq 1.8.1, bind-dig, coreutils-base64, kmod-nft-tproxy). Version stamp applied
+  in BOTH constants.sh (0.8.5) and luci main.js. Fresh install with EMPTY
+  proxy_string correctly ABORTS ("Outbound section not found") — expected, not a
+  bug. After setting a valid test SS proxy
+  (`ss://<b64userinfo>@192.0.2.10:8388#test`) + restart: sing-box running, nft
+  `NetShiftTable` with correct marks (0x00100000/0x00200000 -> tproxy
+  127.0.0.1:1602), rt_tables `105 netshift`, dnsmasq -> 127.0.0.42, Clash API
+  :9090 listening, `sing-box check` rc=0, `global_check` renders perfectly
+  (UTF-8 emoji intact — apk packaging preserves encoding). get_system_info JSON
+  correct, fetched `latest: 0.8.6` from GitHub.
+- ASYNC CORE-SWITCH path WORKS on apk: `component_action_async sing_box
+  install_extended` returns instantly with job_id (no rpcd 30s brick — task-007
+  fix holds on apk). NOTE: `component_action_status` JSON has keys
+  success/running/exit_code/message — NO "status" key (don't poll-grep for
+  "status").
+- **BUG #2 (minor, cosmetic): check_update_stable shows apk `-r` suffix.**
+  returns current_version "1.12.17" vs latest_version "1.12.17-r1" (status
+  correctly "latest" — the ${v%%-*} semver compare works, only the DISPLAY
+  string carries apk's -r1). UI would show "latest: 1.12.17-r1". Polish for apk.
+- **FINDING #3 (GOOD — graceful failure validated): extended install FAILED
+  SAFELY on the small overlay.** Download (armv7 v1.13.12-extended-2.4.0) ok to
+  tmpfs, but extraction ran out of overlay space; updater rolled back cleanly:
+  stock core stayed executable & running, no leftover /tmp/netshift-sbext.*, no
+  brick. The extract logic (updater.sh ~1016-1027) already rm's the live binary
+  then streams the new member straight onto the final path (never 2 binaries on
+  overlay) + tmpfs backup/restore — well-designed. The HISTORIC brick did NOT
+  recur. Real limitation: the EXTENDED binary (~50MB+) simply can't fit a
+  ~12-60M overlay (Orange Pi One class) — matches the documented ≥25MB
+  requirement; extended is not installable on small-flash devices. Failure msg
+  even guesses the cause correctly.
+- **FINDING #5 (the one to chase): after the FAILED extended-install rollback,
+  stock `sing-box version/help/check` SEGFAULT (rc 139)** while the already-
+  RUNNING daemon kept working. ROOT: the rollback `mv backup -> /usr/bin/sing-box`
+  restored a binary, but the on-disk file ended up being a PRE-EXISTING stale
+  `Jun-4` binary (the box had an old sing-box before my test); the live daemon's
+  /proc/PID/exe showed `-> /usr/bin/sing-box (deleted)`. So the segfault is an
+  ARTIFACT of (failed extended rollback) × (pre-existing stale binary) × (100%-
+  full overlay during the op), NOT a clean repro of our code. BUT worth a guarded
+  re-test on a CLEAN box with adequate overlay: confirm a normal apk
+  install/reinstall of stock sing-box 1.12.17 on armv7/OWRT25 does NOT segfault
+  on `version`/`check` (if it does, that breaks sing_box_save_config validation).
+- OVERLAY 100% during the failed extract caused transient `uci: I/O error` +
+  `crontab: can't create root.new` on the first stop; `du` of overlay upper was
+  only 21M while `df` said 100% (loop/squashfs accounting + fs fragmentation).
+  Stopping netshift freed it back to 61%, then clean.
+- CLEANUP (always do this): `/etc/init.d/netshift stop` -> `apk del
+  luci-i18n-netshift-ru luci-app-netshift` then `apk del netshift` (apk
+  reverse-dep purge also removed sing-box/jq/kmods, 146->128 pkgs). prerm
+  correctly removed `105 netshift` from rt_tables. /etc/config/netshift is a
+  conffile (survives removal — rm by hand if you want a pristine box). Final
+  state restored: no pkgs/table/rt/proc, internet OK, overlay 40%, dnsmasq
+  noresolv=0. Box returned to baseline.
+- Minor: a fresh-box `restart` logs `crontab: can't open 'root'` (no root
+  crontab spool yet) — cosmetic, cron line still created later.
+
+## Finding #5 RESOLVED + task-027 backup-integrity fix (2026-06-07)
+
+- RE-VERIFIED #5 on a CLEAN box: freshly apk-installed stock sing-box 1.12.17
+  (the REAL 40119352-byte / 40MB armv7 binary) runs version/check/help all rc=0,
+  NO segfault. So #5 (segfault) was NOT our bug — it was a corrupt-restore
+  ARTIFACT: last session's failed extended-install rollback had `mv`'d a
+  TRUNCATED 12.7MB backup onto /usr/bin/sing-box (real binary is 40MB) under a
+  100%-full overlay, and that truncated file segfaulted. KEY TELL: binary SIZE
+  mismatch (12.7M vs 40M) + the live daemon's /proc/PID/exe showed "(deleted)".
+- BUT re-reading updater.sh exposed a REAL latent bug behind the artifact: the
+  core-swap backup `cp -p <bin> <tmpfs-backup> 2>/dev/null` checked only cp's exit
+  code, with NO size/integrity check. busybox cp can truncate under tmpfs ENOSPC
+  and silently pass the guard, so the rollback `mv backup -> /usr/bin/sing-box`
+  could restore a CORRUPT (segfaulting) binary — the safety net handing the router
+  a broken core. Same pattern in BOTH the extended path (~997-1014, rollbacks
+  ~1019-1060) AND the stable path (~1138-1155 + updates_stable_rollback).
+- FIX = task-027 (shell-backend-developer, code-reviewer APPROVED, gates green):
+  two busybox-safe helpers `updates_verify_copy src dst` (0 iff dst size == src
+  size via `wc -c < file`) and `updates_backup_is_complete backup expected_size`
+  (vs a size STASHED at backup time, NOT the live path which a half-written
+  extract may have clobbered). Gate all 4 backup-cp sites (abort BEFORE touching
+  the live binary -> working core intact); guard all 4 restore sites (extended
+  x3 + updates_stable_rollback, now takes $3/$4 sizes, both call sites threaded)
+  to REFUSE restoring a truncated/missing backup (honest failure JSON + error log
+  instead of installing a broken core). NO exit 1 (async worker -> would skip JSON
+  + epilogue); used the updates_log+echo+return 1 pattern. +test_backup_integrity
+  (alias backupguard, 10 assertions). shellcheck clean; smoke all = 120 passed/0
+  (110 -> +10).
+- BUSYBOX SIZE-COMPARE IDIOM (reusable, reviewer-flagged): end size guards with
+  `[ -n "$x" ] && [ "$x" = "$y" ]` — the `-n` short-circuit makes an empty `wc -c`
+  output fail SAFE (refuse restore) instead of `[: arg`. Use `wc -c < file`
+  (redirect, no leading-whitespace) NOT `wc -c file` (arg form has whitespace).
+- ON-HARDWARE PROOF (router 192.168.1.101): pushed the fixed updater.sh, sourced
+  the real functions, made a real 40MB source + a head-c-truncated 12.7MB backup
+  (the exact size that originally segfaulted) -> all 7 assertions PASS incl.
+  rollback-refuses-truncated (live NOT clobbered) and rollback-restores-complete.
+  PERF note: `dd bs=1 count=12M` to truncate is GLACIAL on armv7 (timed out);
+  use `head -c N` instead. Box cleaned to baseline after (apk del sing-box; no
+  pkgs/table/binary, internet OK, overlay 40%).

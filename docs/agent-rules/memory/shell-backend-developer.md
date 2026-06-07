@@ -729,3 +729,51 @@ findings; keep under ~200 lines.
   unchanged due to the documented piped-while subshell counter quirk). UTF-8
   intact. New constant `TMP_SUBSCRIPTION_MERGE_FOLDER`; UCI example documents the
   `list subscription_url` form. NO sacred constant/port/mark/path changed.
+
+## task-027: core-swap backup integrity (truncated-rollback anti-segfault)
+
+- Root cause (hardware, OpenWrt 25, armv7, tiny overlay): the tmpfs core backup
+  used `cp -p ... 2>/dev/null` checking ONLY cp's rc. busybox `cp` can TRUNCATE
+  under tmpfs ENOSPC and still return 0, so a partial backup passed the "Failed
+  to backup current sing-box binary" guard; then the rollback `mv backup ->
+  /usr/bin/sing-box` restored a 12.7 MB stub in place of the real ~40 MB core →
+  segfault (rc 139) on every invocation. The rollback IS the safety net, so a
+  corrupt backup is strictly worse than not rolling back.
+- Two new helpers at the top of `updater.sh` (next to `updates_log`):
+  `updates_verify_copy src dst` (0 iff dst exists and `wc -c < dst` == `wc -c <
+  src`; absent src → 0 = nothing to back up) and `updates_backup_is_complete
+  backup expected_size` (0 iff backup exists and `wc -c` == the stashed size).
+  Size-match only — guarding TRUNCATION not bit-rot; do NOT md5/sha a 40 MB
+  binary on slow armv7. busybox-safe `wc -c < file` (NOT GNU stat).
+- **Stash the expected size at backup time.** After each backup `cp` succeeds +
+  verifies, record `backup_binary_size="$(wc -c < "$backup_binary")"` (and
+  `backup_cronet_size`) into NEW locals. Rollbacks compare the backup's current
+  size against that stash (not against the live `/usr/bin/sing-box`, which the
+  half-written extract may have already clobbered). For `updates_stable_rollback`
+  the sizes are passed as NEW args $3/$4 — both call sites updated.
+- Backup-cp gates (4): extended binary, extended libcronet, stable binary,
+  stable libcronet — each `if ! cp -p ... || ! updates_verify_copy ...; then`
+  inside the EXISTING abort path that fires BEFORE the live binary is touched →
+  healthy box = no-op pass, working core left intact on failure.
+- Rollback restore guards (4 sites): extended extract-fail, extended cronet-fail,
+  extended validation-fail, and shared `updates_stable_rollback`. Pattern: `if
+  updates_backup_is_complete "$backup" "$size"; then mv -f ...; else updates_log
+  "...backup is corrupt/incomplete; NOT restoring to avoid installing a broken
+  core" "error"; fi`. NEVER overwrite live from a truncated backup.
+- CRITICAL: this runs inside the `component_action` async worker → NO `exit 1`
+  (would kill the worker, skip JSON emission + restore epilogue). The corrupt-
+  backup branches just `updates_log "..." "error"` and fall through to the
+  existing `echo "{...success:false...}"; return 1` honest-failure path. Did NOT
+  touch download/extract streaming (rm-then-stream), connectivity self-heal,
+  async machinery, or any constant.
+- Smoke: NEW top-level `test_backup_integrity` (alias `backupguard`, 10
+  assertions). Driver sources REAL updater.sh, silences log, re-pins
+  `UPDATES_SING_BOX_BIN`/`UPDATES_LIBCRONET_LIB` to /tmp temp files (so the
+  container's real binary is untouched), builds 64-byte src + complete + 10-byte
+  truncated fixtures via `dd`, then drives the 3 helpers + `updates_stable_rollback`
+  with truncated vs complete backups (asserts live marker survives the truncated
+  rollback AND the complete one overwrites it). Parsed in the CURRENT shell
+  (`while read < "$out"`, no pipe) so PASS counts are EXACT (avoids the
+  piped-while subshell counter quirk). Registered all 5 points (all)/case alias/
+  usage line/docker-compose comment). shellcheck -S error clean (bin+libs+
+  install.sh); `smoke-tests all` = 120 passed / 0 failed (110 baseline + 10 new).

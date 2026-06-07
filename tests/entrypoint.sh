@@ -3539,6 +3539,157 @@ DRVEOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: core-swap backup integrity (task-027)
+# ─────────────────────────────────────────────────────────────────
+# Guards the on-hardware latent bug where a TRUNCATED tmpfs backup (busybox cp
+# under ENOSPC) could be restored over /usr/bin/sing-box, installing a
+# segfaulting core as the "safe" fallback. Drives the REAL sourced updater.sh:
+#   * updates_verify_copy        — size-match gate used right after the backup cp.
+#   * updates_backup_is_complete — size-match gate used before every rollback.
+#   * updates_stable_rollback    — must REFUSE to overwrite the live binary from
+#                                  a truncated backup (and DO restore a complete
+#                                  one), with UPDATES_SING_BOX_BIN pointed at a
+#                                  temp file so the container's real binary is
+#                                  never touched.
+# Asserts: (a) complete backup verifies OK; (b) truncated/missing backup is
+# detected (verify nonzero); (c) rollback does not clobber the live path from a
+# truncated backup but still restores from a complete one.
+test_backup_integrity() {
+    header "Core-swap Backup Integrity (task-027)"
+
+    local updater="${NETSHIFT_LIB_DIR}/updater.sh"
+    if [ ! -r "$updater" ]; then
+        skip "updater.sh not found in ${NETSHIFT_LIB_DIR}"
+        return
+    fi
+
+    local work="/tmp/netshift-backupguard-$$"
+    rm -rf "$work"
+    mkdir -p "$work"
+
+    # Driver: source updater.sh, silence logging, re-pin the live-binary paths to
+    # temp files, then run the verify helpers + the rollback guard. Each check
+    # echoes a name:OK / name:FAIL token. The driver runs to a result file which
+    # we parse in the CURRENT shell (no pipe) so the PASS/FAIL counters are exact.
+    local drv="$work/driver.sh"
+    cat > "$drv" << 'DRVEOF'
+log() { :; }
+echolog() { :; }
+nolog() { :; }
+updates_log() { :; }
+. "DRV_UPDATER"
+updates_log() { :; }
+
+W="DRV_WORK"
+
+# Fixtures: a "source" of 64 bytes, a COMPLETE copy, a TRUNCATED copy.
+src="$W/src.bin"
+complete="$W/complete.backup"
+truncated="$W/truncated.backup"
+dd if=/dev/zero of="$src" bs=1 count=64 >/dev/null 2>&1
+cp -p "$src" "$complete"
+dd if=/dev/zero of="$truncated" bs=1 count=10 >/dev/null 2>&1
+
+# ── (a) a complete backup verifies OK ──────────────────────────────────────
+if updates_verify_copy "$src" "$complete"; then
+    echo 'backupguard-verify-complete-ok:OK'
+else
+    echo 'backupguard-verify-complete-ok:FAIL'
+fi
+
+# ── (b1) a truncated backup is detected (verify nonzero) ────────────────────
+if updates_verify_copy "$src" "$truncated"; then
+    echo 'backupguard-verify-truncated-detected:FAIL'
+else
+    echo 'backupguard-verify-truncated-detected:OK'
+fi
+
+# ── (b2) a missing backup is detected (verify nonzero) ──────────────────────
+if updates_verify_copy "$src" "$W/does-not-exist.backup"; then
+    echo 'backupguard-verify-missing-detected:FAIL'
+else
+    echo 'backupguard-verify-missing-detected:OK'
+fi
+
+# ── (b3) absent source = nothing to back up = trivially OK ──────────────────
+if updates_verify_copy "$W/no-source" "$W/no-dst"; then
+    echo 'backupguard-verify-absent-source-ok:OK'
+else
+    echo 'backupguard-verify-absent-source-ok:FAIL'
+fi
+
+# ── backup-is-complete: size match / mismatch / missing ─────────────────────
+sz=$(wc -c < "$src")
+if updates_backup_is_complete "$complete" "$sz"; then
+    echo 'backupguard-iscomplete-match:OK'
+else
+    echo 'backupguard-iscomplete-match:FAIL'
+fi
+if updates_backup_is_complete "$truncated" "$sz"; then
+    echo 'backupguard-iscomplete-mismatch:FAIL'
+else
+    echo 'backupguard-iscomplete-mismatch:OK'
+fi
+if updates_backup_is_complete "$W/does-not-exist.backup" "$sz"; then
+    echo 'backupguard-iscomplete-missing:FAIL'
+else
+    echo 'backupguard-iscomplete-missing:OK'
+fi
+
+# ── (c) updates_stable_rollback must NOT clobber the live path from a
+#       TRUNCATED backup; it MUST restore from a COMPLETE one. ───────────────
+# Point the live paths at temp files holding a known-good "current" core so we
+# can detect whether the rollback overwrote them.
+UPDATES_SING_BOX_BIN="$W/live-sing-box"
+UPDATES_LIBCRONET_LIB="$W/live-libcronet.so"
+
+# --- truncated backup: rollback must REFUSE (live core left intact) ---
+printf 'LIVE-GOOD-CORE-INTACT-MARKER\n' > "$UPDATES_SING_BOX_BIN"
+trunc_backup="$W/rb-trunc.backup"
+dd if=/dev/zero of="$trunc_backup" bs=1 count=10 >/dev/null 2>&1
+# Record an expected size (64) that does NOT match the 10-byte truncated backup.
+updates_stable_rollback "$trunc_backup" "" "64" ""
+if grep -q 'LIVE-GOOD-CORE-INTACT-MARKER' "$UPDATES_SING_BOX_BIN" 2>/dev/null; then
+    echo 'backupguard-rollback-refuses-truncated:OK'
+else
+    echo 'backupguard-rollback-refuses-truncated:FAIL'
+fi
+# The truncated backup must NOT have been moved into place either.
+if [ -f "$trunc_backup" ]; then
+    echo 'backupguard-rollback-truncated-not-moved:OK'
+else
+    echo 'backupguard-rollback-truncated-not-moved:FAIL'
+fi
+
+# --- complete backup: rollback MUST restore it over the live path ---
+printf 'STALE-HALF-WRITTEN\n' > "$UPDATES_SING_BOX_BIN"
+good_backup="$W/rb-good.backup"
+printf 'RESTORED-PREVIOUS-GOOD-CORE\n' > "$good_backup"
+good_sz=$(wc -c < "$good_backup")
+updates_stable_rollback "$good_backup" "" "$good_sz" ""
+if grep -q 'RESTORED-PREVIOUS-GOOD-CORE' "$UPDATES_SING_BOX_BIN" 2>/dev/null; then
+    echo 'backupguard-rollback-restores-complete:OK'
+else
+    echo 'backupguard-rollback-restores-complete:FAIL'
+fi
+DRVEOF
+    sed -i "s|DRV_UPDATER|$updater|g;s|DRV_WORK|$work|g" "$drv"
+
+    local out="$work/out.txt"
+    ash "$drv" > "$out" 2>/dev/null || true
+
+    local line
+    while IFS= read -r line; do
+        case "$line" in
+            *:OK) pass "${line%:OK}" ;;
+            *:FAIL) fail "$line" "$(cat "$out" 2>/dev/null)" ;;
+        esac
+    done < "$out"
+
+    rm -rf "$work"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────
 main() {
@@ -3572,6 +3723,7 @@ main() {
             test_check_update_stable
             test_check_update_extended
             test_self_update_netshift
+            test_backup_integrity
             ;;
         deps)        test_deps ;;
         syntax)      test_syntax ;;
@@ -3590,12 +3742,13 @@ main() {
         stablecheck) test_check_update_stable ;;
         extcheck)    test_check_update_extended ;;
         selfupdate)  test_self_update_netshift ;;
+        backupguard) test_backup_integrity ;;
         jq)          test_jq_helpers ;;
         cm)          test_config_manager ;;
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck selfupdate"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck selfupdate backupguard"
             exit 1
             ;;
     esac
