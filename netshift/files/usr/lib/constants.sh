@@ -28,6 +28,12 @@ TMP_SUBSCRIPTION_MERGE_FOLDER="$TMP_SING_BOX_FOLDER/subscription-merge"
 # "singbox/<version>" candidate is prepended at runtime (it depends on the
 # installed sing-box). Order matters: most-likely-to-work first.
 SUBSCRIPTION_USER_AGENT_CANDIDATES="v2rayN Happ Hiddify Clash.Meta ClashMetaForAndroid"
+# Subset of SUBSCRIPTION_USER_AGENT_CANDIDATES that well-known panels answer with
+# an Xray JSON body (which carries xhttp/transport nodes the default sing-box JSON
+# may omit). Used by build_subscription_user_agent_candidates when a section's
+# subscription_format_preference is "xray": these UAs are probed FIRST so an
+# Xray-JSON feed is recovered before a sing-box JSON under the default UA wins.
+SUBSCRIPTION_USER_AGENT_XRAY_CANDIDATES="v2rayN Happ"
 CLOUDFLARE_OCTETS="8.47 162.159 188.114" # Endpoints https://github.com/ampetelin/warp-endpoint-checker
 JQ_REQUIRED_VERSION="1.7.1"
 COREUTILS_BASE64_REQUIRED_VERSION="9.7"

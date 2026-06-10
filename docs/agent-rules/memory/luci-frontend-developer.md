@@ -707,3 +707,37 @@ append findings; keep under ~200 lines.
   node_modules/.bin; yarn.lock unchanged, no .yarn/.yarnrc.yml.
 - FLAG (no browser in env): the neutral→checked card transition + toast were
   verified by reasoning + the pure cards.test.js, NOT screenshotted.
+
+## task-032 — subscription_format_preference dropdown (Subscription tab)
+
+- Added a `form.ListValue` `subscription_format_preference` in section.js
+  (HAND-WRITTEN, NOT bundled) right AFTER `subscription_url` (~144-157),
+  modelled EXACTLY on `subscription_update_interval`: `.value('auto',_('Auto'))`
+  / `.value('xray',_('Xray JSON (Happ)'))` / `.value('singbox',_('Sing-box'))`,
+  `o.default='auto'`, same `depends({connection_type:'proxy',proxy_config_type:
+  'subscription'})`. NO explicit `rmempty` — like the interval field, LuCI
+  ListValue defaults `rmempty=true`, so selecting the default ('auto') does NOT
+  write a spurious UCI value (matches backend task-031 which treats empty/
+  unknown as auto). Single-literal `_()` description (no concat).
+- types.ts: added optional union `subscription_format_preference?: 'auto' |
+  'xray' | 'singbox';` to `ConfigProxySubscriptionSection` (after
+  subscription_url). Pure type-only → erased at build.
+- BACKEND CONTRACT (task-031, in working tree): UCI option name EXACTLY
+  `subscription_format_preference`, values auto/xray/singbox; netshift bin reads
+  it (`uci -q get …subscription_format_preference`, empty→auto). Confirmed via
+  grep before editing.
+- main.js: NO diff (section.js hand-written + type-only types.ts), like
+  task-023. Build still run to confirm; `git diff --stat main.js` empty.
+- locales: `node {extract-calls,generate-pot,generate-po ru,distribute-
+  locales}.js`. msgid delta PURELY ADDITIVE — 4 added (Auto / Subscription
+  format / Xray JSON (Happ) / the description), 0 removed; "Sing-box" REUSED an
+  existing msgid (so generate-po reported 339/342, only 3 truly-new beyond the
+  reused one). Filled 4 ru msgstr in SOURCE locales/netshift.ru.po (Auto→Авто,
+  Subscription format→Формат подписки, Xray JSON (Happ)→Xray JSON (Happ),
+  description translated) then distribute → po/ru + po/templates byte-identical
+  to source (diff -q). Only header msgstr empty. 5 catalog files touched.
+- yarn classic 1.22.22; ran gate via node_modules/.bin (prettier --write src /
+  eslint src --ext .ts,.tsx --max-warnings=0 / vitest 472 pass / tsup). format
+  diff on src = ONLY my 1 types.ts line (no churn). yarn.lock unchanged, no
+  .yarn/.yarnrc.yml. FLAG (no browser): dropdown rendering/auto-hide not
+  screenshotted — verified structurally.

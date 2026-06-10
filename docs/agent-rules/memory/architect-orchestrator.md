@@ -718,3 +718,55 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   ['component_action','netshift','check_update']; runNetshiftCheck has 0
   fetchSystemInfo calls. All gates green. Ready for manual commit (operator
   commits; agents never auto-commit).
+
+## task-031/032 subscription format/UA preference (try Xray-JSON first) (2026-06-07)
+
+- PROBLEM (from a user, Иван): a panel returns a sing-box config (missing
+  xhttp/hysteria2 outbounds) under the default `singbox/<ver>` UA, but returns an
+  Xray JSON (which HAS xhttp) under a Happ-like UA. Manual paste of the link
+  works (xray-json parsed), via subscription it doesn't.
+- ROOT CAUSE (explore-verified): download_subscription_into_cache UA-probe loop
+  BREAKS on the FIRST UA whose body is usable (bin/netshift:566-585). UA order
+  (auto) = singbox/<ver> ALWAYS FIRST -> cached winner -> whitelist (v2rayN Happ
+  Hiddify Clash.Meta ClashMetaForAndroid). So a valid sing-box JSON under the
+  first UA terminates the probe and the Happ/Xray UA is never tried.
+- SECOND GAP (on record, OUT OF SCOPE): xray_json_to_uri_lines emits xhttp
+  (helpers.sh:1208-1211) but NOT hysteria2 (protocol gate only vless/trojan/
+  shadowsocks — hysteria2 isn't an Xray protocol). hysteria2 works via the
+  URI-list path, not the xray-json converter. If a user reports missing
+  hysteria2-from-xray-json, need a sample of their subscription FIRST (likely
+  it's in clash-yaml or uri-list, not xray-json) before any converter fix.
+- OPERATOR DECISION: Variant A — a per-section UCI option
+  `subscription_format_preference` (auto|xray|singbox, default auto) that REORDERS
+  the UA candidates (NOT changing the break-on-first-usable loop). dropdown
+  values auto/xray/singbox; explicit user choice OUTRANKS the cached UA-winner.
+- task-031 (backend, APPROVED W/ CONDITIONS->met, smoke 127/0): new 3rd arg
+  `format_preference` to build_subscription_user_agent_candidates (helpers.sh);
+  xray -> SUBSCRIPTION_USER_AGENT_XRAY_CANDIDATES="v2rayN Happ" (new constant)
+  FIRST, then default, then cached winner, then rest; singbox/auto/empty/unknown
+  -> today's exact order (unknown==auto, forward-compatible); configured-UA
+  short-circuit unchanged (explicit UA still emits ONLY itself). The dedup `seen`
+  loop is reused so the front-loaded xray UAs outrank the cached winner.
+  download_subscription_into_cache reads the option (default auto) + passes 3rd
+  arg. UCI example documents BOTH the new option AND the previously-undocumented
+  subscription_user_agent. CASE I = 9 assertions, all OK in smoke.
+- task-032 (frontend, APPROVED): form.ListValue subscription_format_preference in
+  the `subscription` tab modelled on subscription_update_interval; values
+  auto/xray/singbox, default auto, same depends; type union added to
+  ConfigProxySubscriptionSection (optional). section.js+type-only -> main.js NO
+  diff (correct). 4 new msgids, ru filled, fe<->luci byte-identical. Contract
+  verified end-to-end: bin reads name, helpers branches on xray, FE writes exactly
+  those values.
+- REUSABLE (reviewer): for backend-coupled UI enum dropdowns the safe-match
+  criterion is "every UI value is handled + unknown/empty -> sane default", NOT a
+  strict 1:1 set match (here auto/singbox/unknown all fold to the default
+  ordering, only xray is distinct).
+- TECH-DEBT FOLLOW-UP (found by reviewer, pre-existing, harness-wide, NOT a
+  task-031 defect): the smoke `fb-case*`/`rh-case*` tests parse tokens via
+  `cmd | while read ... pass/fail` — the `while` runs in a PIPE SUBSHELL so
+  PASS/FAIL increments are LOST; a `:FAIL` prints red but does NOT fail CI
+  (pipeline rc = while rc = 0, set -e doesn't trip). The COUNTED pattern is
+  `while read ... done < "$out"` (redirect, current shell) used by
+  test_backup_integrity. Worth a dedicated task to migrate fb/rh parsers so these
+  assertions are truly gated. Until then, trust the per-token ✓/✗ marks, not just
+  "Results: N passed".

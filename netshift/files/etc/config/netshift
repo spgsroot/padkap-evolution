@@ -59,6 +59,16 @@ config section 'main'
 #        # add wget --no-check-certificate for IP-host panels whose HTTPS cert is
 #        # invalid/self-signed/missing-SAN. Disables certificate verification.
 #        #option subscription_insecure '0'
+#        # Force a specific client User-Agent for the fetch. When set, ONLY this
+#        # UA is used (no probing). Leave unset to auto-probe well-known clients.
+#        #option subscription_user_agent 'Happ'
+#        # Preferred body FORMAT to probe first (auto|xray|singbox, default auto).
+#        # Panels often serve a different config per User-Agent. 'xray' tries the
+#        # Xray-JSON UAs (Happ/v2rayN) FIRST to recover xhttp nodes a panel only
+#        # exposes in its Xray JSON; 'singbox' keeps the singbox/<ver> UA first;
+#        # 'auto' preserves the default order. Ignored when subscription_user_agent
+#        # is set (an explicit UA always wins).
+#        #option subscription_format_preference 'auto'
 #        option subscription_update_interval '1h'
 #        #option subscription_group_by_countries '0'
 #        #option urltest_check_interval '3m'

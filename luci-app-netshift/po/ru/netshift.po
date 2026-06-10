@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: NETSHIFT\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-07 19:26+0300\n"
-"PO-Revision-Date: 2026-06-07 19:26+0300\n"
+"POT-Creation-Date: 2026-06-07 20:04+0300\n"
+"PO-Revision-Date: 2026-06-07 20:04+0300\n"
 "Last-Translator: yandexru45\n"
 "Language-Team: none\n"
 "Language: ru\n"
@@ -61,6 +61,9 @@ msgstr "Необходимо указать хотя бы один действ�
 
 msgid "At least one valid subnet or IP must be specified. Comments-only content is not allowed."
 msgstr "Необходимо указать хотя бы одну действительную подсеть или IP. Только комментарии недопустимы."
+
+msgid "Auto"
+msgstr "Авто"
 
 msgid "Available actions"
 msgstr "Доступные действия"
@@ -854,6 +857,9 @@ msgstr "Подписка"
 msgid "Subscription feeds, server filters and URLTest tuning"
 msgstr "Источники подписок, фильтры серверов и настройка URLTest"
 
+msgid "Subscription format"
+msgstr "Формат подписки"
+
 msgid "Subscription Update Interval"
 msgstr "Интервал обновления подписки"
 
@@ -1021,6 +1027,12 @@ msgstr "Когда включено, трафик, не совпадающий �
 
 msgid "Which proxy/VPN section carries the DNS. Leave unset to use the first configured outbound."
 msgstr "Какая секция прокси/VPN обслуживает DNS. Оставьте пустым, чтобы использовать первый настроенный outbound."
+
+msgid "Which subscription format (client) to fetch first. Auto uses the default order. Choose Xray JSON (Happ) when your panel only exposes some nodes (e.g. xhttp) under a Happ-like client, or Sing-box to prefer the sing-box format."
+msgstr "Какой формат подписки (клиент) запрашивать первым. «Авто» использует порядок по умолчанию. Выберите «Xray JSON (Happ)», если ваша панель отдаёт некоторые узлы (например, xhttp) только под клиентом вроде Happ, или «Sing-box», чтобы предпочесть формат sing-box."
+
+msgid "Xray JSON (Happ)"
+msgstr "Xray JSON (Happ)"
 
 msgid "YACD Secret Key"
 msgstr "Секретный ключ YACD"

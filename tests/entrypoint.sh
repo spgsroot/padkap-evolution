@@ -1340,6 +1340,91 @@ else
     echo "fb-caseI-configured-only(got '$caseI_conf' lines=$caseI_conf_lines):FAIL"
 fi
 
+# (c2) Empty preference (auto via 3rd arg) keeps today's order: default first.
+caseI_emptyp="$(build_subscription_user_agent_candidates "" "" "")"
+caseI_emptyp_first="$(printf '%s\n' "$caseI_emptyp" | sed -n '1p')"
+if [ "$caseI_emptyp_first" = "$caseI_default" ]; then
+    echo 'fb-caseI-emptypref-default-first:OK'
+else
+    echo "fb-caseI-emptypref-default-first(got '$caseI_emptyp_first'):FAIL"
+fi
+
+# (d) auto preference keeps today's order: default singbox/<ver> first.
+caseI_autop="$(build_subscription_user_agent_candidates "" "" "auto")"
+caseI_autop_first="$(printf '%s\n' "$caseI_autop" | sed -n '1p')"
+if [ "$caseI_autop_first" = "$caseI_default" ]; then
+    echo 'fb-caseI-autopref-default-first:OK'
+else
+    echo "fb-caseI-autopref-default-first(got '$caseI_autop_first'):FAIL"
+fi
+
+# (e) singbox preference: default singbox/<ver> first (defined behaviour).
+caseI_sbp="$(build_subscription_user_agent_candidates "" "Hiddify" "singbox")"
+caseI_sbp_first="$(printf '%s\n' "$caseI_sbp" | sed -n '1p')"
+if [ "$caseI_sbp_first" = "$caseI_default" ]; then
+    echo 'fb-caseI-singboxpref-default-first:OK'
+else
+    echo "fb-caseI-singboxpref-default-first(got '$caseI_sbp_first'):FAIL"
+fi
+
+# (f) xray preference: the Xray-JSON UAs (Happ/v2rayN) come FIRST — before the
+# default singbox/<ver> AND before the cached preferred winner. Pass a cached
+# preferred ('Hiddify') to prove the xray UAs outrank it.
+caseI_xray="$(build_subscription_user_agent_candidates "" "Hiddify" "xray")"
+caseI_xray_first="$(printf '%s\n' "$caseI_xray" | sed -n '1p')"
+caseI_xray_second="$(printf '%s\n' "$caseI_xray" | sed -n '2p')"
+# Position helper: line number of an exact match (empty if absent).
+caseI_pos() { printf '%s\n' "$1" | grep -Fxn "$2" | head -n1 | cut -d: -f1; }
+caseI_xray_p_v2rayn="$(caseI_pos "$caseI_xray" 'v2rayN')"
+caseI_xray_p_happ="$(caseI_pos "$caseI_xray" 'Happ')"
+caseI_xray_p_default="$(caseI_pos "$caseI_xray" "$caseI_default")"
+caseI_xray_p_pref="$(caseI_pos "$caseI_xray" 'Hiddify')"
+# First two lines are the xray subset "v2rayN Happ" (in constant order).
+if [ "$caseI_xray_first" = 'v2rayN' ] && [ "$caseI_xray_second" = 'Happ' ]; then
+    echo 'fb-caseI-xraypref-xray-first:OK'
+else
+    echo "fb-caseI-xraypref-xray-first(1st='$caseI_xray_first' 2nd='$caseI_xray_second'):FAIL"
+fi
+# xray UAs precede the default and the cached preferred winner.
+if [ -n "$caseI_xray_p_v2rayn" ] && [ -n "$caseI_xray_p_happ" ] &&
+    [ -n "$caseI_xray_p_default" ] && [ -n "$caseI_xray_p_pref" ] &&
+    [ "$caseI_xray_p_v2rayn" -lt "$caseI_xray_p_default" ] &&
+    [ "$caseI_xray_p_happ" -lt "$caseI_xray_p_default" ] &&
+    [ "$caseI_xray_p_v2rayn" -lt "$caseI_xray_p_pref" ] &&
+    [ "$caseI_xray_p_happ" -lt "$caseI_xray_p_pref" ]; then
+    echo 'fb-caseI-xraypref-outranks-default-and-cache:OK'
+else
+    echo "fb-caseI-xraypref-outranks-default-and-cache(v2rayN=$caseI_xray_p_v2rayn happ=$caseI_xray_p_happ def=$caseI_xray_p_default pref=$caseI_xray_p_pref):FAIL"
+fi
+# Dedup holds: no UA emitted twice (each of v2rayN/Happ/default appears once).
+caseI_xray_v2rayn_count="$(printf '%s\n' "$caseI_xray" | grep -Fxc 'v2rayN')"
+caseI_xray_happ_count="$(printf '%s\n' "$caseI_xray" | grep -Fxc 'Happ')"
+caseI_xray_def_count="$(printf '%s\n' "$caseI_xray" | grep -Fxc "$caseI_default")"
+if [ "$caseI_xray_v2rayn_count" = "1" ] && [ "$caseI_xray_happ_count" = "1" ] &&
+    [ "$caseI_xray_def_count" = "1" ]; then
+    echo 'fb-caseI-xraypref-dedup:OK'
+else
+    echo "fb-caseI-xraypref-dedup(v2rayN=$caseI_xray_v2rayn_count happ=$caseI_xray_happ_count def=$caseI_xray_def_count):FAIL"
+fi
+
+# (g) Unrecognised preference falls back to auto order: default first.
+caseI_unk="$(build_subscription_user_agent_candidates "" "Hiddify" "totally-bogus")"
+caseI_unk_first="$(printf '%s\n' "$caseI_unk" | sed -n '1p')"
+if [ "$caseI_unk_first" = "$caseI_default" ]; then
+    echo 'fb-caseI-unknownpref-auto-first:OK'
+else
+    echo "fb-caseI-unknownpref-auto-first(got '$caseI_unk_first'):FAIL"
+fi
+
+# (h) Explicit configured UA still short-circuits regardless of preference.
+caseI_conf_xray="$(build_subscription_user_agent_candidates "MyClient/1.0" "Hiddify" "xray")"
+caseI_conf_xray_lines="$(printf '%s\n' "$caseI_conf_xray" | grep -c .)"
+if [ "$caseI_conf_xray" = "MyClient/1.0" ] && [ "$caseI_conf_xray_lines" = "1" ]; then
+    echo 'fb-caseI-configured-overrides-pref:OK'
+else
+    echo "fb-caseI-configured-overrides-pref(got '$caseI_conf_xray' lines=$caseI_conf_xray_lines):FAIL"
+fi
+
 # ── CASE J: subscription keyword whitelist/blacklist filter ─────────
 # Drive sing_box_cf_prepare_subscription_batch directly with a synthetic
 # subscription JSON and assert kept counts/names for include/exclude lists.

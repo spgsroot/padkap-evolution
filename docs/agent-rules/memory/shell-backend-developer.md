@@ -826,3 +826,45 @@ findings; keep under ~200 lines.
   (all)/case alias/usage line/docker-compose comment). shellcheck -S error clean
   (bin+libs+install.sh); `smoke-tests all` = 127 passed / 0 failed (120 baseline
   + 7 new). NO sacred constant/port/mark/path/ACL/frontend change.
+
+## task-031 — subscription_format_preference (UA probe reorder)
+
+- Per-section UCI option `subscription_format_preference` (auto|xray|singbox,
+  default auto) REORDERS the UA candidate probe so xray-yielding UAs can be
+  tried FIRST. Root cause it fixes: the download probe loop in
+  `download_subscription_into_cache` (bin/netshift) breaks on the first usable
+  body, so the always-first `singbox/<ver>` UA wins and the Happ/v2rayN UA
+  (which some panels answer with Xray JSON carrying xhttp nodes) is never tried.
+  We ONLY reorder — first-usable-still-wins loop is untouched.
+- `build_subscription_user_agent_candidates` (helpers.sh ~746) now takes a 3rd
+  arg `format_preference`. Configured-UA short-circuit (arg1 set → emit only it)
+  is UNCHANGED and still outranks preference. For auto-mode ordering I switched
+  from a fixed `for candidate in ...` list to `set -- <list>; for candidate in
+  "$@"` so I could pick the list by preference in an `if`:
+  - xray: `set -- $SUBSCRIPTION_USER_AGENT_XRAY_CANDIDATES "$default" "$pref" $SUBSCRIPTION_USER_AGENT_CANDIDATES`
+  - else (auto/empty/singbox/unknown): `set -- "$default" "$pref" $SUBSCRIPTION_USER_AGENT_CANDIDATES` (today's exact order).
+  The EXISTING newline `seen` dedup loop is reused unchanged → xray UAs precede
+  the cached winner AND default, and nothing is emitted twice. Unknown values
+  fall through `else` = auto (forward-compatible). Keep the
+  `# shellcheck disable=SC2086` intentional-word-split comment on EACH `set --`
+  line that splices a `$LIST`.
+- New constant: `SUBSCRIPTION_USER_AGENT_XRAY_CANDIDATES="v2rayN Happ"` in
+  constants.sh next to `SUBSCRIPTION_USER_AGENT_CANDIDATES` (the xray subset;
+  no inline magic strings per project-core §5).
+- bin/netshift `download_subscription_into_cache` (~530): added local
+  `subscription_format_preference`, read via
+  `uci -q get netshift.${section}.subscription_format_preference`, default
+  "auto" when empty, passed as 3rd arg to the builder (~539). Per-URL cache +
+  UA-winner caching unchanged.
+- UCI example (etc/config/netshift) documents BOTH the new option AND the
+  previously-read-but-undocumented `subscription_user_agent` (schema honesty).
+- Tests: extended existing CASE I in `test_subscription`'s `fb` sub-script
+  (which sources real constants.sh+helpers.sh under ash). Added cases c2–h:
+  empty/auto/singbox→default first; xray→v2rayN,Happ first + outrank
+  default&cached pref + dedup; unknown→auto; configured+xray→only configured.
+  The `fb` parser is generic `*:OK`/`*:FAIL`, so new `fb-caseI-*` lines need NO
+  case alias. shellcheck -S error clean; `smoke-tests all` = 127 passed /
+  0 failed (+8 new CASE-I assertions, same 127 total since they're sub-tokens).
+- GOTCHA: `test_rejected_hash` emits `rh-case1/2/6:FAIL` sub-tokens that print
+  red but are NOT counted by the global tally (suite still EXIT=0, 127/0) — this
+  is PRE-EXISTING on the clean tree (verified by git stash), not a regression.

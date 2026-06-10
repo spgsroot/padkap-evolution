@@ -507,7 +507,7 @@ download_subscription_into_cache() {
     local tmpfile persist_tmpfile url_tmpfile rejected_cache_path tmp_hash rejected_hash validation_reason file_size fallback_tmp
     local configured_user_agent user_agent_cache_path cached_user_agent candidates_file
     local effective_user_agent download_ok winning_user_agent ua_tmpfile
-    local subscription_insecure
+    local subscription_insecure subscription_format_preference
 
     ensure_subscription_cache_dir || {
         log "Failed to prepare persistent subscription cache directory '$SUBSCRIPTION_CACHE_FOLDER' for section '$section'" "error"
@@ -529,8 +529,13 @@ download_subscription_into_cache() {
     user_agent_cache_path="$(get_subscription_user_agent_cache_path "$section" "$urlhash")"
     configured_user_agent="$(uci -q get "netshift.${section}.subscription_user_agent" 2>/dev/null)"
     cached_user_agent="$(cat "$user_agent_cache_path" 2>/dev/null)"
+    # Per-section format preference reorders the UA probe (auto|xray|singbox).
+    # Empty/unset -> auto (today's order); unknown values are treated as auto by
+    # the builder. The probe loop still keeps the first body with valid outbounds.
+    subscription_format_preference="$(uci -q get "netshift.${section}.subscription_format_preference" 2>/dev/null)"
+    [ -n "$subscription_format_preference" ] || subscription_format_preference="auto"
     candidates_file="${tmpfile}.ua"
-    if ! build_subscription_user_agent_candidates "$configured_user_agent" "$cached_user_agent" > "$candidates_file"; then
+    if ! build_subscription_user_agent_candidates "$configured_user_agent" "$cached_user_agent" "$subscription_format_preference" > "$candidates_file"; then
         log "Failed to build subscription User-Agent candidate list for section '$section'" "error"
         rm -f "$tmpfile" "$candidates_file"
         return 11

@@ -143,6 +143,21 @@ function createSectionContent(section) {
 
   o = section.taboption(
     "subscription",
+    form.ListValue,
+    "subscription_format_preference",
+    _("Subscription format"),
+    _(
+      "Which subscription format (client) to fetch first. Auto uses the default order. Choose Xray JSON (Happ) when your panel only exposes some nodes (e.g. xhttp) under a Happ-like client, or Sing-box to prefer the sing-box format.",
+    ),
+  );
+  o.value("auto", _("Auto"));
+  o.value("xray", _("Xray JSON (Happ)"));
+  o.value("singbox", _("Sing-box"));
+  o.default = "auto";
+  o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
+
+  o = section.taboption(
+    "subscription",
     form.Flag,
     "subscription_insecure",
     _("Allow insecure TLS for subscription fetch"),
