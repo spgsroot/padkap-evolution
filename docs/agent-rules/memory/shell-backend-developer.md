@@ -868,3 +868,73 @@ findings; keep under ~200 lines.
 - GOTCHA: `test_rejected_hash` emits `rh-case1/2/6:FAIL` sub-tokens that print
   red but are NOT counted by the global tally (suite still EXIT=0, 127/0) — this
   is PRE-EXISTING on the clean tree (verified by git stash), not a regression.
+
+## task-033: multi-section direct-out i/o timeout — egress mark gap (route.default_mark)
+
+- ROOT CAUSE (confirmed on a LIVE kernel in the smoke container): the 0.8.6
+  "mark everything" nft model marks ALL LAN tcp/udp with NFT_FAKEIP_MARK
+  (0x00100000) in `mangle` prerouting, and `ip rule fwmark 0x00100000 lookup
+  netshift` (table `netshift` = `local default dev lo`) redirects it to tproxy.
+  But NOTHING stamped a mark on sing-box's OWN egress. So sing-box's outbound
+  sockets — especially `direct-out`, which under route.final=direct-out now
+  carries ALL unmatched + proxy-server-dial + DNS-upstream traffic — inherited
+  the tproxy SO_MARK (0x00100000), and the SAME `ip rule` re-captured them into
+  `local lo` -> looped back into tproxy -> never reached the internet. That is
+  the exact `outbound/direct[direct-out]: i/o timeout` triad (+ DNS n/a, since
+  the DNS upstream egress looped too). 0.8.5 masked it: destination-selective
+  marking meant unrelated traffic never entered sing-box.
+- LIVE PROOF (decisive, reproducible with only busybox curl+nft+ip in the
+  container — NO netns/veth needed): install the real `ip rule fwmark
+  0x00100000 lookup netshift` + a tiny `type route hook output` nft chain that
+  sets a chosen mark on egress to a test IP, then `curl -m`:
+  * egress UNMARKED  -> rc=301 ~0.1s (control, reaches internet)
+  * egress mark 0x00100000 (FAKEIP) -> rc=28 timeout 5s = LOOP/BLACKHOLE (bug)
+  * egress mark 0x00200000 (OUTBOUND) -> rc=301 ~0.15s = ESCAPES (fix)
+  Because `ip rule 105` matches ONLY 0x00100000, a 0x00200000-marked egress
+  falls through to the main table and egresses normally.
+- FIX (minimal, fail-open, B-variant per spec — keep mark-everything but make it
+  fail OPEN): emit `route.default_mark = NFT_OUTBOUND_MARK` so every sing-box
+  egress connection is stamped 0x00200000. Per sing-box docs, route.default_mark
+  is "Set routing mark by default" (Linux), overridden by outbound.routing_mark.
+  This makes ALL egress (direct-out, proxy-server dials, DNS upstream) escape
+  the `ip rule`, and the EXISTING `mangle_output meta mark 0x00200000 return`
+  rule (previously dead — nothing set it) now actually fires to keep that egress
+  out of the proxy chain. NO sacred VALUE changed — only newly APPLYING the
+  existing NFT_OUTBOUND_MARK constant to egress (explicitly allowed by the spec).
+- IMPL: `sing_box_cm_configure_route` gained optional 6th arg `default_mark`
+  (sing_box_config_manager.sh) merged conditionally
+  (`+ (if $default_mark != "" then {default_mark: ($default_mark|tonumber)}
+  else {} end)`) — EMPTY arg is byte-identical to the legacy 5-arg call
+  (back-compat asserted in smoke). Caller `sing_box_configure_route`
+  (bin/netshift) derives `default_egress_mark=$(( NFT_OUTBOUND_MARK ))` (ash
+  arithmetic converts the hex `0x00200000` -> decimal `2097152`; sing-box
+  default_mark is an INTEGER, jq `tonumber` does NOT parse hex so pass decimal)
+  and passes it to BOTH branches (auto-detect "" iface + explicit iface).
+- FEATURES PRESERVED: default_mark is route-global -> applies to v4 AND v6 egress
+  (both ip rules match only FAKEIP_MARK, so both escape). DoH-block / per-section
+  route rules / DNS-over-proxy are route.rules / dns.servers — untouched. IPv6
+  inbounds/sets/rules untouched. Verified v6 + explicit-interface variants both
+  carry default_mark=2097152 and `sing-box check` passes.
+- SMOKE: new top-level `test_section_isolation` (alias `isolation`, after
+  test_nft_ipv6). 8 asserts: (a) config-gen contract — default_mark present as a
+  NUMBER == decimal NFT_OUTBOUND_MARK, distinct from FAKEIP mark, empty-arg
+  byte-parity + key-omitted; (b) 2-section config (section 2 hysteria2
+  UNREACHABLE) with the REAL generated route passes `sing-box check` + carries
+  default_mark; (c) LIVE-kernel fail-open proof (gated on nft+curl+net+!SKIP):
+  fakeip-marked egress black-holes, outbound-marked egress escapes. Registered
+  all 5 points (all)/case alias/usage line/docker-compose comment).
+- GOTCHA repeats bitten: (1) `$$` inside a heredoc driver expands to the
+  DRIVER's pid, not the entrypoint's — pass output paths in via sed
+  placeholder, don't rely on `$$` matching across the two shells. (2) The
+  generic `*:OK)` case pattern does NOT match a line with trailing text like
+  `si-...:OK (2097152, number)` — use `*:OK*`/`*:FAIL*` (FAIL first). (3)
+  Under the suite's `set -e`, bare `ip -4 rule del ... 2>/dev/null` /
+  `nft delete ...` abort the whole function when the object is absent — guard
+  EACH with `|| true`. (4) Driver-extracted route needs
+  `del(.route.rules[]?.__service_tag)` before `sing-box check` (the strip
+  normally happens in sing_box_cm_save_config_to_file's walk()).
+- shellcheck -S error clean (bin + sing_box_config_manager.sh + install.sh);
+  `smoke-tests all` = 131 passed / 0 failed (was 127 baseline; `isolation`'s 4
+  direct pass calls counted, its 8 piped-while ✓ marks are the source of truth,
+  all green). The pre-existing `rh-case1/2/6:FAIL` red marks persist (documented
+  task-031 quirk, suite still EXIT=0).

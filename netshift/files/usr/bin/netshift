@@ -2320,13 +2320,32 @@ sing_box_configure_route() {
         fi
     fi
 
+    # Stamp every sing-box-originated egress connection with NFT_OUTBOUND_MARK
+    # (route.default_mark). The nft mangle prerouting chain marks ALL LAN traffic
+    # with NFT_FAKEIP_MARK and `ip rule ... fwmark NFT_FAKEIP_MARK lookup
+    # netshift` redirects it to the tproxy path. Without an egress mark,
+    # sing-box's own outbound sockets (especially direct-out, which carries ALL
+    # unmatched traffic) inherit the tproxy SO_MARK (NFT_FAKEIP_MARK), so the
+    # `ip rule` re-captures them into `local default dev lo` -> they loop back
+    # into tproxy and never reach the internet (the 0.8.6 "direct-out i/o
+    # timeout" regression). Marking egress with NFT_OUTBOUND_MARK makes the
+    # `ip rule` (which matches only NFT_FAKEIP_MARK) skip these packets so they
+    # egress via the main table, and the existing `mangle_output meta mark
+    # NFT_OUTBOUND_MARK return` rule keeps them out of the proxy chain. This is
+    # fail-open: unmatched/unproxied traffic always reaches the internet even
+    # when a section's outbound is unreachable. sing-box default_mark is an
+    # integer; convert the hex constant to decimal via ash arithmetic.
+    local default_egress_mark
+    default_egress_mark=$(( NFT_OUTBOUND_MARK ))
+
     local output_network_interface
     config_get output_network_interface "settings" "output_network_interface"
     if [ -z "$output_network_interface" ]; then
-        config=$(sing_box_cm_configure_route "$config" "$route_final" true "$SB_DNS_SERVER_TAG")
+        config=$(sing_box_cm_configure_route "$config" "$route_final" true "$SB_DNS_SERVER_TAG" "" \
+            "$default_egress_mark")
     else
         config=$(sing_box_cm_configure_route "$config" "$route_final" false "$SB_DNS_SERVER_TAG" \
-            "$output_network_interface")
+            "$output_network_interface" "$default_egress_mark")
     fi
 
     local sniff_inbounds sniff_inbounds_csv

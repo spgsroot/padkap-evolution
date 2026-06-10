@@ -427,6 +427,193 @@ test_nft_ipv6() {
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: Section-isolation invariant (task-033)
+#
+# Regression: upgrading 0.8.5 -> 0.8.6 made ANY additional / not-ready /
+# unreachable section black-hole ALL traffic to outbound/direct[direct-out]
+# with `i/o timeout` (+ DNS n/a). Root cause (confirmed on a live kernel):
+# the nft `mangle` prerouting chain marks ALL LAN tcp/udp with NFT_FAKEIP_MARK
+# and `ip rule ... fwmark NFT_FAKEIP_MARK lookup netshift` redirects it to
+# tproxy, but NOTHING stamped a mark on sing-box's OWN egress. So sing-box's
+# direct-out sockets (which now carry ALL unmatched traffic) inherited the
+# tproxy SO_MARK (NFT_FAKEIP_MARK) and the `ip rule` re-captured them into
+# `local default dev lo` -> they looped back into tproxy and timed out.
+#
+# Fix: sing_box_cm_configure_route now emits route.default_mark =
+# NFT_OUTBOUND_MARK, so every sing-box egress connection is marked
+# NFT_OUTBOUND_MARK. The `ip rule` matches only NFT_FAKEIP_MARK, so the marked
+# egress escapes via the main table (fail-open) and the existing
+# `mangle_output meta mark NFT_OUTBOUND_MARK return` rule keeps it out of the
+# proxy chain.
+#
+# This test pins (a) the config-gen contract (default_mark present, decimal,
+# == NFT_OUTBOUND_MARK; empty-arg path byte-identical for back-compat), (b)
+# that sing-box accepts a 2-section config (one outbound unreachable) with the
+# generated route, and (c) — when runnable on the live kernel — that an egress
+# packet carrying NFT_OUTBOUND_MARK reaches the internet while one carrying
+# NFT_FAKEIP_MARK loops/black-holes (the exact mechanism of the regression).
+# ─────────────────────────────────────────────────────────────────
+test_section_isolation() {
+    header "Section-isolation invariant (task-033)"
+
+    if ! command -v sing-box > /dev/null 2>&1; then
+        skip "sing-box not installed"
+        return
+    fi
+
+    local lib="${NETSHIFT_LIB_DIR}"
+    local cm_lib="$lib/sing_box_config_manager.sh"
+    local const_lib="$lib/constants.sh"
+    if [ ! -r "$cm_lib" ] || [ ! -r "$const_lib" ]; then
+        fail "sing_box_config_manager.sh / constants.sh not found"
+        return
+    fi
+
+    # ── (a) config-gen contract: default_mark present + correct + back-compat ──
+    local drv="/tmp/test-section-isolation-$$.sh"
+    cat > "$drv" << 'SIEOF'
+. "CONST_LIB"
+. "CM_LIB"
+
+mark_dec=$(( NFT_OUTBOUND_MARK ))
+seed='{"route":{},"outbounds":[{"type":"direct","tag":"direct-out"}]}'
+
+# WITH a default_mark (the fix path): assert it lands as a NUMBER equal to the
+# decimal NFT_OUTBOUND_MARK.
+with=$(sing_box_cm_configure_route "$seed" "direct-out" true "dns-server" "" "$mark_dec")
+got=$(echo "$with" | jq -r '.route.default_mark // "MISSING"')
+got_type=$(echo "$with" | jq -r '.route.default_mark | type')
+if [ "$got" = "$mark_dec" ] && [ "$got_type" = "number" ]; then
+    echo "si-default-mark-present:OK ($got, $got_type)"
+else
+    echo "si-default-mark-present:FAIL (got '$got' type '$got_type', want '$mark_dec' number)"
+fi
+
+# The mark must NOT collide with NFT_FAKEIP_MARK (which the ip rule catches).
+if [ "$mark_dec" != "$(( NFT_FAKEIP_MARK ))" ]; then
+    echo "si-mark-distinct-from-fakeip:OK"
+else
+    echo "si-mark-distinct-from-fakeip:FAIL (egress mark == fakeip mark -> would still loop)"
+fi
+
+# WITHOUT a default_mark (empty 6th arg): must be byte-identical to the legacy
+# 5-arg call (back-compat for any other caller / the off path).
+empty6=$(sing_box_cm_configure_route "$seed" "direct-out" true "dns-server" "" "")
+legacy5=$(sing_box_cm_configure_route "$seed" "direct-out" true "dns-server" "")
+if [ "$(echo "$empty6" | jq -cS .)" = "$(echo "$legacy5" | jq -cS .)" ]; then
+    echo "si-empty-mark-byte-parity:OK"
+else
+    echo "si-empty-mark-byte-parity:FAIL (empty default_mark changed output)"
+fi
+if echo "$empty6" | jq -e '.route | has("default_mark")' > /dev/null 2>&1; then
+    echo "si-empty-mark-omitted:FAIL (default_mark key present when empty)"
+else
+    echo "si-empty-mark-omitted:OK"
+fi
+
+# Emit the generated route (with mark) for the caller to build a full config.
+echo "$with" | jq -c 'del(.route.rules[]?.__service_tag) | .route' > "ROUTE_JSON"
+SIEOF
+    local route_json="/tmp/si-route-$$.json"
+    sed -i "s#CONST_LIB#$const_lib#g; s#CM_LIB#$cm_lib#g; s#ROUTE_JSON#$route_json#g" "$drv"
+
+    rm -f "$route_json"
+    local out
+    out="$(ash "$drv" 2>&1 || true)"
+    echo "$out" | while IFS= read -r line; do
+        case "$line" in
+            *:FAIL*) fail "$line" ;;
+            *:OK*)   pass "$line" ;;
+        esac
+    done
+
+    # ── (b) 2-section config (section 2 unreachable) + generated route: check ──
+    local mark_dec
+    # shellcheck disable=SC1090
+    . "$const_lib"
+    mark_dec=$(( NFT_OUTBOUND_MARK ))
+    if [ -r "$route_json" ]; then
+        local cfg="/tmp/si-config-$$.json"
+        jq -n --slurpfile route "$route_json" '{
+            log: { level: "warn" },
+            dns: { servers: [ { tag: "dns-server", type: "udp", server: "1.1.1.1" } ], final: "dns-server" },
+            inbounds: [ { type: "tproxy", tag: "tproxy-in", listen: "127.0.0.1", listen_port: 1602 } ],
+            outbounds: [
+                { type: "direct", tag: "direct-out" },
+                { type: "shadowsocks", tag: "main-out", server: "10.10.10.10", server_port: 8388, method: "aes-256-gcm", password: "password" },
+                { type: "hysteria2", tag: "second-out", server: "198.51.100.99", server_port: 443, password: "pass", tls: { enabled: true, insecure: true } }
+            ],
+            route: $route[0]
+        }' > "$cfg"
+        if sing-box check -c "$cfg" > /dev/null 2>&1; then
+            pass "si-2section-unreachable-check:OK (sing-box accepts config + route.default_mark)"
+        else
+            fail "si-2section-unreachable-check:FAIL" "$(sing-box check -c "$cfg" 2>&1)"
+        fi
+        # the generated route must actually carry default_mark
+        if [ "$(jq -r '.route.default_mark' "$cfg")" = "$mark_dec" ]; then
+            pass "si-config-has-default-mark:OK"
+        else
+            fail "si-config-has-default-mark:FAIL"
+        fi
+        rm -f "$cfg"
+    else
+        fail "si-route-gen:FAIL (route JSON not produced)"
+    fi
+
+    # ── (c) live-kernel fail-open mechanism (only if nft + curl + net) ──────────
+    # Build the EXACT ip rule the backend installs (fwmark NFT_FAKEIP_MARK ->
+    # table netshift = local default dev lo) and prove:
+    #   - egress carrying NFT_FAKEIP_MARK loops/black-holes (the bug)
+    #   - egress carrying NFT_OUTBOUND_MARK (the fix) reaches the internet
+    if [ "${TEST_SKIP_NETWORK:-0}" = "1" ]; then
+        skip "si-live-loop: network skipped (TEST_SKIP_NETWORK=1)"
+    elif ! command -v nft > /dev/null 2>&1 || ! command -v curl > /dev/null 2>&1; then
+        skip "si-live-loop: nft/curl not available"
+    elif ! curl -s -m 5 -o /dev/null http://1.1.1.1/ 2>/dev/null; then
+        skip "si-live-loop: no outbound connectivity in container"
+    else
+        # All ip/nft mutations are best-effort and may legitimately return
+        # non-zero (rule absent on first del, etc.); guard each against `set -e`.
+        grep -q "105 netshift" /etc/iproute2/rt_tables 2>/dev/null || \
+            echo "105 netshift" >> /etc/iproute2/rt_tables
+        ip -4 route replace local 0.0.0.0/0 dev lo table netshift 2>/dev/null || \
+            ip -4 route add local 0.0.0.0/0 dev lo table netshift 2>/dev/null || true
+        ip -4 rule del fwmark "$NFT_FAKEIP_MARK"/"$NFT_FAKEIP_MARK" table netshift priority 105 2>/dev/null || true
+        ip -4 rule add fwmark "$NFT_FAKEIP_MARK"/"$NFT_FAKEIP_MARK" table netshift priority 105 2>/dev/null || true
+
+        nft delete table inet netshift_si_test 2>/dev/null || true
+        nft add table inet netshift_si_test 2>/dev/null || true
+        nft add chain inet netshift_si_test out \
+            '{ type route hook output priority -200; policy accept; }' 2>/dev/null || true
+
+        # FAKEIP_MARK egress -> must loop (curl times out, rc!=0).
+        nft flush chain inet netshift_si_test out 2>/dev/null || true
+        nft add rule inet netshift_si_test out ip daddr 1.0.0.1 meta mark set "$NFT_FAKEIP_MARK" counter 2>/dev/null || true
+        if curl -s -m 6 -o /dev/null http://1.0.0.1/ 2>/dev/null; then
+            fail "si-live-loop-fakeip-blackholes:FAIL (fakeip-marked egress unexpectedly escaped)"
+        else
+            pass "si-live-loop-fakeip-blackholes:OK (fakeip-marked egress loops, as in the bug)"
+        fi
+
+        # OUTBOUND_MARK egress (the fix) -> must reach the internet (rc==0).
+        nft flush chain inet netshift_si_test out 2>/dev/null || true
+        nft add rule inet netshift_si_test out ip daddr 1.0.0.1 meta mark set "$NFT_OUTBOUND_MARK" counter 2>/dev/null || true
+        if curl -s -m 6 -o /dev/null http://1.0.0.1/ 2>/dev/null; then
+            pass "si-live-loop-outbound-escapes:OK (outbound-marked egress reaches internet -> fail-open)"
+        else
+            fail "si-live-loop-outbound-escapes:FAIL (outbound-marked egress did NOT escape)"
+        fi
+
+        nft delete table inet netshift_si_test 2>/dev/null || true
+        ip -4 rule del fwmark "$NFT_FAKEIP_MARK"/"$NFT_FAKEIP_MARK" table netshift priority 105 2>/dev/null || true
+        ip -4 route flush table netshift 2>/dev/null || true
+    fi
+
+    rm -f "$drv" "$route_json"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Test: sing-box Config Generation
 # ─────────────────────────────────────────────────────────────────
 test_sing_box_config() {
@@ -3930,6 +4117,7 @@ main() {
             test_sing_box_config
             test_nft
             test_nft_ipv6
+            test_section_isolation
             test_diagnostics
             test_subscription
             test_insecure_fetch
@@ -3950,6 +4138,7 @@ main() {
         helpers)     test_helpers ;;
         nft)         test_nft ;;
         nftv6)       test_nft_ipv6 ;;
+        isolation)   test_section_isolation ;;
         diagnostics) test_diagnostics ;;
         subscription) test_subscription ;;
         insecure)    test_insecure_fetch ;;
@@ -3968,7 +4157,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck selfupdate backupguard"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 isolation diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck selfupdate backupguard"
             exit 1
             ;;
     esac

@@ -770,3 +770,57 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   test_backup_integrity. Worth a dedicated task to migrate fb/rh parsers so these
   assertions are truly gated. Until then, trust the per-token ✓/✗ marks, not just
   "Results: N passed".
+
+## task-033 CRITICAL multi-section regression 0.8.5->0.8.6 (2026-06-10)
+
+- USER REPORTS: after 0.8.5->0.8.6 upgrade, creating ANY extra connection section
+  (even URL-only / unreachable endpoint) black-holes ALL networking: sing-box
+  stays up but every flow -> `outbound/direct[direct-out]: i/o timeout`, DNS-over-
+  proxy n/a on all servers, some report sing-box won't come up. Rollback to 0.8.5
+  fixes it.
+- DIAGNOSIS METHOD (reusable): bisected 0.8.5..0.8.6 with an explore agent, then
+  PROVED config-gen is NOT the bug by generating a 2-section (ss+hysteria2) config
+  in the OWRT smoke container with a DEVICE-FAITHFUL uci (real /etc/config/netshift
+  + config_load via /lib/functions.sh) -> valid, both outbounds, sing-box check
+  PASS. LANDMINE I hit: a harness that points NETSHIFT_CONFIG at a RAW uci FILE and
+  calls config_load on it returns ALL-EMPTY config_get (incl. the first section) ->
+  looks like "hysteria2 wipes config" but it's a HARNESS ARTIFACT, not a bug.
+  ALWAYS repro device-faithfully (real `uci`/`/etc/config`), never a raw-file
+  config_load. I distrusted the artifact and re-verified -> correct call.
+- ROOT CAUSE: the nft marking-model rewrite (commit 03806d7 "ipv6+doh-block",
+  finalized d391e32 which deleted @netshift_subnets/NFT_COMMON_SET_NAME). 0.8.5
+  marked ONLY traffic destined to @netshift_subnets + FakeIP range into sing-box
+  (destination-selective = fail-open by construction). 0.8.6 marks ALL LAN tcp/udp
+  into sing-box (FAKEIP_MARK 0x00100000) with route.final=direct-out and lets
+  sing-box decide via FakeIP DNS. THE BUG (confirmed on a LIVE kernel by the
+  backend dev): sing-box's OWN egress (direct-out, proxy-server dials, DNS upstream)
+  inherits the tproxy SO_MARK 0x00100000, gets re-caught by
+  `ip rule fwmark 0x100000/0x100000 table 105` (-> local default dev lo -> tproxy)
+  -> LOOPS -> i/o timeout. And nothing ever APPLIED NFT_OUTBOUND_MARK (0x00200000)
+  to sing-box egress (it was referenced ONLY in the dead `mangle_output meta mark
+  0x00200000 return` rule). 0.8.5 masked this because unrelated traffic never
+  entered sing-box. So one not-ready section poisons the WHOLE shared pipeline.
+- FIX (task-033, APPROVED, smoke 131/0): emit sing-box `route.default_mark =
+  NFT_OUTBOUND_MARK` so ALL sing-box egress is stamped 0x00200000. The ip rules
+  match ONLY 0x00100000 (FAKEIP) and the two marks are DISJOINT BITS (bit20 vs
+  bit21), so 0x00200000 egress escapes to the main table + the existing
+  mangle_output return rule fires -> fail-open restored. 2-line surgical change:
+  sing_box_cm_configure_route gained an OPTIONAL 6th arg default_mark (emitted as a
+  jq NUMBER via tonumber; empty arg = byte-identical to legacy 5-arg); bin/netshift
+  sing_box_configure_route computes `$(( NFT_OUTBOUND_MARK ))` (ash hex->decimal
+  2097152 because jq tonumber can't parse hex) and passes it to BOTH route branches
+  (auto-detect + explicit) -> covers v4+v6. NO sacred VALUE changed (only APPLIES
+  the existing constant). Features preserved (IPv6/DoH-block/per-section/DNS-over-
+  proxy untouched). New test_section_isolation (alias isolation) incl. a LIVE-kernel
+  proof: si-live-loop-fakeip-blackholes (reproduces bug) + si-live-loop-outbound-
+  escapes (proves fix). Whole-chain verified: device-faithful 2-section config has
+  route.default_mark:2097152, sing-box check PASS.
+- REUSABLE: nft `ip rule fwmark X/X` is a MASKED match -> egress stamped with a
+  DISJOINT-bit mark escapes. The standard sing-box tproxy "mark everything" model
+  REQUIRES route.default_mark (or per-outbound routing_mark) on sing-box egress, or
+  its own connections loop back into tproxy. When reviewing "mark everything"
+  tproxy designs, always check that sing-box egress carries the escape mark.
+- READY for manual commit (agents never auto-commit). NOT yet tested on real
+  hardware with multiple sections — the live-kernel loop/escape proof is in the
+  smoke container (egress mark chain + real ip rule); a real LAN-client end-to-end
+  path needs a device (container busybox ip lacks netns/veth).
