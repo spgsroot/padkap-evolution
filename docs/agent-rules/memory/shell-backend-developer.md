@@ -1194,3 +1194,82 @@ findings; keep under ~200 lines.
   tests/entrypoint.sh). `smoke-tests all` = 155 passed / 0 failed (152 task-035
   baseline + 3 new monfd asserts). Pre-existing `rh-case1/2/6:FAIL` red marks
   persist (task-031 piped-while quirk; suite EXIT=0).
+
+## task-038: graceful-skip unsupported scheme (fatal→warn) + splithttp→xhttp alias
+
+- DEFECT 1: `sing_box_cf_add_proxy_outbound`'s `*)` default arm did `log fatal;
+  exit 1`. That dispatcher is SHARED by url(single)/selector-loop/urltest-loop
+  callers (bin/netshift) + the subscription fallback parser
+  (`normalize_subscription_to_singbox` in helpers.sh). One unsupported link
+  (tuic/wireguard/anytls/shadowtls/http/typo) in a urltest/selector list aborted
+  the WHOLE config — and worse, `exit 1` inside the caller's `config=$(facade
+  ...)` only exits the SUBSHELL, so config became EMPTY (the task-033 wipe class),
+  not a clean abort.
+- FIX: `*)` arm now `log "...skipping..." "warn"; echo "$config"; return 1`
+  (config echoed UNCHANGED, never empty; non-zero = "skipped"). Supported arms
+  keep their genuine `exit 1` paths (ss base64 fail, vmess decode fail) — those
+  STILL only exit the subshell, which the callers now treat as skip too (defense:
+  see the `[ -n "$_new_config" ]` guard below). Did NOT touch supported parsing.
+- SKIP CONTRACT (callers): non-zero return + unchanged echo. Caller pattern is
+  `if _new_config="$(facade ...)" && [ -n "$_new_config" ]; then config="$_new_config"; <use it> else <skip>`.
+  The `[ -n ]` guard is belt-and-suspenders so a genuine supported-arm `exit 1`
+  (empty echo) ALSO degrades to skip rather than wiping `config`.
+- CALLER AUDIT (all 4):
+  * url single (bin ~2151): on skip → `echolog ... error` + `mark_section_outbound_unavailable`
+    so the route emits a REJECT rule (section degrades to unavailable). No exit.
+  * selector loop (bin ~2182): add the member tag ONLY on facade success → no
+    dangling selector member. All-skipped → empty `outbound_tags` → mark
+    unavailable, don't build the selector.
+  * urltest loop (bin ~2228): same as selector (urltest+selector members clean).
+  * subscription normalize (helpers ~1489): ALREADY graceful — pre-filters
+    schemes to `vless|trojan|ss|hysteria2|hy2|socks*` (the `*)` arm is never even
+    reached there) AND tolerates non-zero via `|| { continue }` + JSON/count
+    guards. No change needed; my facade change is compatible.
+- SINGLE-URL DEGRADE MECHANISM: new tiny helper `mark_section_outbound_unavailable`
+  (next to `mark_subscription_outbound_unavailable`) just appends the section to
+  `SUBSCRIPTION_UNAVAILABLE_SECTIONS` (the SAME flag `subscription_outbound_is_unavailable`
+  reads), so `sing_box_configure_route` emits `sing_box_cm_add_reject_route_rule`
+  for it (bin ~2818). Does NOT touch any per-URL subscription rejected-hash cache
+  (that is subscription-only). Reuses the existing unavailable-section plumbing.
+- PROVEN: `sing-box check` does NOT reject a route rule whose `outbound` points
+  at a MISSING outbound, NOR a selector/urltest with a missing member (both rc=0
+  in-container). So a dangling tag wouldn't fail `check` — but it would blackhole
+  traffic at runtime, hence we still keep selector members clean + mark unavailable.
+- DEFECT 2 (splithttp = pre-rename xhttp): facade `_add_outbound_transport` now
+  matches `xhttp | splithttp` (same `sing_box_cm_set_xhttp_transport_for_outbound`,
+  same `is_sing_box_extended` gate); `_add_outbound_security` ALPN-default branch
+  also accepts `type=splithttp`. `xray_json_to_uri_lines` (helpers.sh): normalize
+  `$net` `splithttp`→`xhttp` and read settings from `($ss.xhttpSettings //
+  $ss.splithttpSettings // {})`. Emitted URI always carries the modern `type=xhttp`.
+- **JQ-IN-SHELL-STRING APOSTROPHE LANDMINE (cost a debug cycle):** an apostrophe
+  in a jq COMMENT inside a `jq -er '...'` single-quoted shell string CLOSES the
+  shell string. I wrote `# ... the facade's xhttp branch ...` and shellcheck
+  reported SC1073/SC1056/SC1072 brace errors on the FUNCTION line, not the
+  comment — because everything after the `'` was parsed as shell. It would ALSO
+  break the real jq at runtime. NEVER put `'` in a jq comment (or any char that
+  closes the surrounding shell quote). Rewrote the comments apostrophe-free.
+- **`((` at a jq pipe-element start trips shellcheck** (reads it as arithmetic
+  `$((...))` context → SC1056/1072): `| (($x // "y") | if ...)` failed; split it
+  into `| ($x // "y") as $tmp | (if $tmp ...) as $net` (single leading `(`).
+- TEST: new top-level `test_unsupported_skip` (alias `unsupported`, after
+  test_monitor_fd_hygiene). awk-extracts the SHIPPED `configure_outbound_handler`
+  + `mark_section_outbound_unavailable` verbatim, sources real
+  facade/manager/helpers/constants (symlink to /usr/lib/netshift), table-driven
+  `config_get` stub via `US_<section>_<opt>` vars, log stub recording level|msg.
+  Cases: (1) urltest + (1b) selector mix supported(vless/hysteria2)+unsupported
+  (tuic/wireguard/garbage) → no-abort, supported present, unsupported absent,
+  members clean, warning logged, config not wiped, live `sing-box check`; (2)
+  single-URL only-tuic → no crash, no outbound, direct-out survives, section
+  marked unavailable, error logged; (3a) vless `?type=splithttp` → transport.type
+  xhttp + path + extended-gate-off respected; (3b) Xray-JSON
+  network:"splithttp"/splithttpSettings → URI carries `type=xhttp`,`path=/xj`, no
+  literal `splithttp`. The xhttp `sing-box check` SKIPs on the container's STOCK
+  core (rejects xhttp) — assert-only-when-accepted, else SKIP. Registered all 5
+  points (all)/alias/usage/docker-compose comment).
+- GATES: shellcheck -S error clean (install.sh + bin + lib/*.sh + tests). All
+  files UTF-8 intact (syntax test mojibake guard green). `smoke-tests all` = 155
+  passed / 0 failed (same suite total — the new test's per-line passes run in the
+  documented piped-while subshell, so the ✓ marks are truth: 23 green + 1 SKIP).
+  task-037's hysteria2 marks (fb-caseL/N/O) all still green. Pre-existing
+  `rh-case1/2/6:FAIL` red marks persist (task-031 quirk; suite EXIT=0). No sacred
+  value/port/mark/path/ACL changed.

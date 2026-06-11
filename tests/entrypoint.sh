@@ -1012,6 +1012,267 @@ SIEOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: graceful-skip of unsupported proxy schemes + splithttp→xhttp (task-038)
+# ─────────────────────────────────────────────────────────────────
+# Two defects fixed by task-038:
+#  1. sing_box_cf_add_proxy_outbound's `*)` default arm used to log fatal + exit 1
+#     for an unsupported scheme. Since the dispatcher is shared by the single-URL,
+#     selector-loop AND urltest-loop callers, ONE bad link (tuic/wireguard/typo)
+#     aborted generation of the WHOLE config. It now logs a WARNING, echoes the
+#     config UNCHANGED (never empty) and returns non-zero so the caller skips that
+#     node and continues. Loop callers add the member tag only on success (no
+#     dangling selector member); an all-unsupported section is marked unavailable
+#     (reject route rule) instead of crashing the start.
+#  2. `splithttp` (the pre-rename name of `xhttp`) is now accepted as an alias of
+#     xhttp in BOTH the facade transport builder (?type=splithttp) and the
+#     xray_json_to_uri_lines converter (network:"splithttp" / splithttpSettings),
+#     normalized to the modern `xhttp` key downstream.
+#
+# This test drives the SHIPPED configure_outbound_handler (awk-extracted verbatim)
+# for the url/selector/urltest branches with a table-driven config_get stub, the
+# REAL facade/manager/helpers, and a log stub that records warnings/errors. All
+# values are synthetic placeholders (nothing from private.json).
+test_unsupported_skip() {
+    header "Graceful-skip unsupported protocol + splithttp alias (task-038)"
+
+    if ! command -v sing-box > /dev/null 2>&1; then
+        skip "sing-box not installed"
+        return
+    fi
+
+    local lib="${NETSHIFT_LIB_DIR}"
+    local bin="${NETSHIFT_SRC}/usr/bin/netshift"
+    local facade_lib="$lib/sing_box_config_facade.sh"
+    if [ ! -r "$facade_lib" ] || [ ! -r "$bin" ]; then
+        fail "facade lib / bin not found"
+        return
+    fi
+
+    # The facade hardcodes NETSHIFT_LIB="/usr/lib/netshift" for its own sourcing
+    # of helpers + manager; bind the bind-mounted sources to that path.
+    mkdir -p /usr/lib/netshift
+    ln -sf "$lib/helpers.sh" /usr/lib/netshift/helpers.sh
+    ln -sf "$lib/sing_box_config_manager.sh" /usr/lib/netshift/sing_box_config_manager.sh
+
+    local drv="/tmp/test-unsupported-skip-$$.sh"
+    cat > "$drv" << 'USEOF'
+. "CONST_LIB"
+. "FACADE_LIB"
+
+WARN_LOG="/tmp/us-warn-$$.log"
+: > "$WARN_LOG"
+# log/echolog/nolog: record level+message so we can assert a warning fired.
+log()     { printf '%s|%s\n' "${2:-info}" "$1" >> "$WARN_LOG"; }
+echolog() { printf '%s|%s\n' "${2:-info}" "$1" >> "$WARN_LOG"; }
+nolog()   { :; }
+
+# Extended ON so vmess/xhttp gates pass where used.
+is_sing_box_extended() { return 0; }
+
+# awk-extract the SHIPPED handler + the unavailable marker verbatim.
+eval "$(awk '/^configure_outbound_handler\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+eval "$(awk '/^mark_section_outbound_unavailable\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+
+# Table-driven UCI stub. Per-section options are read from US_<section>_<opt>
+# shell vars (dots/dashes in section names normalized to underscores).
+_us_key() { printf 'US_%s_%s' "$(printf '%s' "$1" | tr '.-' '__')" "$2"; }
+config_get() {
+    # $1=dest var, $2=section, $3=option, $4=default
+    local _k _v
+    _k="$(_us_key "$2" "$3")"
+    eval "_v=\"\${$_k:-}\""
+    [ -n "$_v" ] || _v="$4"
+    eval "$1=\"\$_v\""
+    return 0
+}
+config_get_bool() {
+    local _k _v
+    _k="$(_us_key "$2" "$3")"
+    eval "_v=\"\${$_k:-${4:-0}}\""
+    eval "$1=\"\$_v\""
+    return 0
+}
+
+# Helper: assert a warn/error log line containing a substring exists.
+warn_logged() { grep -q "$1" "$WARN_LOG"; }
+
+# Build a minimal full sing-box config around the produced outbounds and run a
+# real `sing-box check`. $1=config JSON, $2=label.
+check_full() {
+    local cfgjson="$1" label="$2" full
+    full="/tmp/us-full-$$-${label}.json"
+    printf '%s' "$cfgjson" | jq '{
+        log: { level: "error" },
+        dns: { servers: [ { tag: "dns-server", type: "udp", server: "1.1.1.1" } ], final: "dns-server" },
+        inbounds: [ { type: "tproxy", tag: "tproxy-in", listen: "127.0.0.1", listen_port: 1602 } ],
+        outbounds: (.outbounds + [ { type: "direct", tag: "direct-out" } ]),
+        route: { rules: [], final: "direct-out" }
+    }' > "$full" 2>/dev/null
+    if sing-box -c "$full" check > /dev/null 2>&1; then
+        echo "${label}:OK"
+    else
+        echo "${label}:FAIL"
+    fi
+    rm -f "$full"
+}
+
+# ── (1) URLTEST list mixing supported (vless/hysteria2) + unsupported ────────
+#         (tuic:// / wireguard:// / garbage://). Generation must NOT abort, the
+#         supported members must be present, the unsupported ones skipped, and a
+#         warning logged. config must NOT be wiped.
+: > "$WARN_LOG"
+config='{"outbounds":[]}'
+SUBSCRIPTION_UNAVAILABLE_SECTIONS=""
+US_mix_connection_type="proxy"
+US_mix_proxy_config_type="urltest"
+US_mix_urltest_proxy_links="vless://11111111-2222-3333-4444-555555555555@v.example.com:443?security=tls&sni=v.example.com tuic://uuid:pw@t.example.com:443 hysteria2://hpass@h.example.com:8443?sni=h.example.com wireguard://x@w.example.com:51820 garbage://nope"
+configure_outbound_handler "mix"
+mix_rc=$?
+
+[ "$mix_rc" = "0" ] && echo 'us-urltest-no-abort:OK' || echo "us-urltest-no-abort:FAIL (rc=$mix_rc)"
+[ -n "$config" ] && printf '%s' "$config" | jq -e . >/dev/null 2>&1 \
+    && echo 'us-urltest-config-not-wiped:OK' || echo 'us-urltest-config-not-wiped:FAIL'
+
+# The two supported member outbounds exist (vless = mix-1-out, hysteria2 = mix-3-out).
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="mix-1-out" and .type=="vless")] | length==1' >/dev/null 2>&1 \
+    && echo 'us-urltest-vless-present:OK' || echo 'us-urltest-vless-present:FAIL'
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="mix-3-out" and .type=="hysteria2")] | length==1' >/dev/null 2>&1 \
+    && echo 'us-urltest-hy2-present:OK' || echo 'us-urltest-hy2-present:FAIL'
+
+# The unsupported members were NOT created.
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="mix-2-out" or .tag=="mix-4-out" or .tag=="mix-5-out")] | length==0' >/dev/null 2>&1 \
+    && echo 'us-urltest-unsupported-absent:OK' || echo 'us-urltest-unsupported-absent:FAIL'
+
+# The urltest + selector reference ONLY the two real members (no dangling tag).
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.type=="urltest")][0].outbounds | (index("mix-1-out")!=null and index("mix-3-out")!=null and index("mix-2-out")==null and index("mix-4-out")==null and index("mix-5-out")==null)' >/dev/null 2>&1 \
+    && echo 'us-urltest-members-clean:OK' || echo 'us-urltest-members-clean:FAIL'
+
+# A warning was logged for the skipped schemes.
+warn_logged "unsupported scheme" && echo 'us-urltest-warning-logged:OK' || echo 'us-urltest-warning-logged:FAIL'
+
+# Whole-chain: the assembled config passes a real sing-box check.
+check_full "$config" "us-urltest-singbox-check"
+
+# ── (1b) SELECTOR list, same mix ─────────────────────────────────────────────
+: > "$WARN_LOG"
+config='{"outbounds":[]}'
+SUBSCRIPTION_UNAVAILABLE_SECTIONS=""
+US_sel_connection_type="proxy"
+US_sel_proxy_config_type="selector"
+US_sel_selector_proxy_links="garbage://nope vless://aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee@v2.example.com:443?security=tls&sni=v2.example.com tuic://u:p@t2.example.com:443"
+configure_outbound_handler "sel"
+sel_rc=$?
+[ "$sel_rc" = "0" ] && echo 'us-selector-no-abort:OK' || echo "us-selector-no-abort:FAIL (rc=$sel_rc)"
+# Only the vless (sel-2-out) member exists; selector references just it.
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="sel-2-out" and .type=="vless")] | length==1' >/dev/null 2>&1 \
+    && echo 'us-selector-vless-present:OK' || echo 'us-selector-vless-present:FAIL'
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.type=="selector")][0].outbounds | (index("sel-2-out")!=null and index("sel-1-out")==null and index("sel-3-out")==null)' >/dev/null 2>&1 \
+    && echo 'us-selector-members-clean:OK' || echo 'us-selector-members-clean:FAIL'
+check_full "$config" "us-selector-singbox-check"
+
+# ── (2) SINGLE-URL section with ONLY an unsupported scheme → degrade ─────────
+#         No crash, no outbound, section marked unavailable, rest of config
+#         continues to generate.
+: > "$WARN_LOG"
+config='{"outbounds":[{"type":"direct","tag":"direct-out"}]}'
+SUBSCRIPTION_UNAVAILABLE_SECTIONS=""
+US_solo_connection_type="proxy"
+US_solo_proxy_config_type="url"
+US_solo_proxy_string="tuic://uuid:pw@only.example.com:443"
+configure_outbound_handler "solo"
+solo_rc=$?
+[ "$solo_rc" = "0" ] && echo 'us-single-no-crash:OK' || echo "us-single-no-crash:FAIL (rc=$solo_rc)"
+# No solo-out outbound was created.
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="solo-out")] | length==0' >/dev/null 2>&1 \
+    && echo 'us-single-no-outbound:OK' || echo 'us-single-no-outbound:FAIL'
+# The pre-existing direct-out (rest of config) survived (config not wiped).
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="direct-out")] | length==1' >/dev/null 2>&1 \
+    && echo 'us-single-rest-continues:OK' || echo 'us-single-rest-continues:FAIL'
+# Section marked unavailable so the route emits a reject rule.
+case " $SUBSCRIPTION_UNAVAILABLE_SECTIONS " in
+*" solo "*) echo 'us-single-marked-unavailable:OK' ;;
+*) echo 'us-single-marked-unavailable:FAIL' ;;
+esac
+warn_logged "no usable outbound" && echo 'us-single-error-logged:OK' || echo 'us-single-error-logged:FAIL'
+
+# ── (3a) splithttp recognized as xhttp via a vless URL ?type=splithttp ───────
+base='{"outbounds":[]}'
+out_split=$(sing_box_cf_add_proxy_outbound "$base" "spl" "vless://77777777-8888-9999-aaaa-bbbbbbbbbbbb@s.example.com:8443?type=splithttp&security=tls&sni=s.example.com&path=/sp&host=s.example.com&mode=auto" "0")
+printf '%s' "$out_split" | jq -e '.outbounds[0].transport.type=="xhttp"' >/dev/null 2>&1 \
+    && echo 'us-splithttp-url-xhttp:OK' || echo 'us-splithttp-url-xhttp:FAIL'
+printf '%s' "$out_split" | jq -e '.outbounds[0].transport.path=="/sp"' >/dev/null 2>&1 \
+    && echo 'us-splithttp-url-path:OK' || echo 'us-splithttp-url-path:FAIL'
+# Extended gate respected: with extended OFF the transport is NOT applied.
+is_sing_box_extended() { return 1; }
+out_split_off=$(sing_box_cf_add_proxy_outbound "$base" "splo" "vless://77777777-8888-9999-aaaa-bbbbbbbbbbbb@s.example.com:8443?type=splithttp&security=tls&sni=s.example.com&path=/sp&host=s.example.com&mode=auto" "0")
+printf '%s' "$out_split_off" | jq -e '.outbounds[0] | has("transport") | not' >/dev/null 2>&1 \
+    && echo 'us-splithttp-gate-off:OK' || echo 'us-splithttp-gate-off:FAIL'
+is_sing_box_extended() { return 0; }
+# Whole-chain: the splithttp(→xhttp) outbound passes a real sing-box check on
+# extended (the container core may be stock, so only assert when it accepts
+# xhttp; otherwise emit SKIP).
+spl_full="/tmp/us-split-full-$$.json"
+printf '%s' "$out_split" | jq '{
+    log: { level: "error" },
+    inbounds: [],
+    outbounds: (.outbounds + [ { type: "direct", tag: "direct-out" } ]),
+    route: { final: "direct-out" }
+}' > "$spl_full" 2>/dev/null
+if sing-box -c "$spl_full" check > /dev/null 2>&1; then
+    echo 'us-splithttp-singbox-check:OK'
+else
+    echo 'us-splithttp-singbox-check:SKIP'
+fi
+rm -f "$spl_full"
+
+# ── (3b) splithttp recognized in xray_json_to_uri_lines (Xray JSON) ──────────
+xray_src="/tmp/us-xray-split-$$.json"
+cat > "$xray_src" << 'XJSON'
+{ "outbounds": [ {
+  "protocol": "vless",
+  "tag": "xray-split",
+  "settings": { "vnext": [ { "address": "xj.example.com", "port": 8443, "users": [ { "id": "cccccccc-dddd-eeee-ffff-000000000000" } ] } ] },
+  "streamSettings": {
+    "network": "splithttp",
+    "security": "tls",
+    "tlsSettings": { "serverName": "xj.example.com" },
+    "splithttpSettings": { "path": "/xj", "host": "xj.example.com", "mode": "auto" }
+  }
+} ] }
+XJSON
+xray_uri="$(xray_json_to_uri_lines "$xray_src" 2>/dev/null)"
+case "$xray_uri" in
+*"type=xhttp"*) echo 'us-xray-splithttp-type-xhttp:OK' ;;
+*) echo "us-xray-splithttp-type-xhttp:FAIL ($xray_uri)" ;;
+esac
+case "$xray_uri" in
+*"path=/xj"*) echo 'us-xray-splithttp-path:OK' ;;
+*) echo "us-xray-splithttp-path:FAIL ($xray_uri)" ;;
+esac
+case "$xray_uri" in
+*"splithttp"*) echo "us-xray-splithttp-normalized:FAIL ($xray_uri)" ;;
+*) echo 'us-xray-splithttp-normalized:OK' ;;
+esac
+rm -f "$xray_src"
+
+rm -f "$WARN_LOG"
+echo 'DONE'
+USEOF
+    sed -i "s|CONST_LIB|$lib/constants.sh|g; s|FACADE_LIB|$facade_lib|g; s|BIN_PATH|$bin|g" "$drv"
+
+    sh "$drv" 2>/dev/null | while IFS= read -r line; do
+        case "$line" in
+            *:OK)   pass "$line" ;;
+            *:FAIL) fail "$line" ;;
+            *:SKIP) skip "$line" ;;
+            DONE) ;;
+            *) ;;
+        esac
+    done
+    rm -f "$drv"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Test: Monitor procd-lock fd hygiene (task-035) + monitor-leak (task-036)
 #
 # ROOT CAUSE under test: the long-lived health monitor used to be launched with
@@ -2491,6 +2752,241 @@ else
     echo "fb-caseK-ascii-no-regression(count=$caseK_ascii_count names='$caseK_ascii_names'):FAIL"
 fi
 rm -f "$caseK_sub"
+
+# ── CASE L: Xray JSON Hysteria2 (protocol "hysteria", version 2) ────
+# Real subscriptions ship Hysteria2 inside the Xray-JSON array as
+# protocol:"hysteria" + streamSettings.network:"hysteria" +
+# hysteriaSettings.{version:2, auth:<password>}; addressing in
+# settings.address/port; TLS in tlsSettings.{serverName, alpn, allowInsecure}.
+# xray_json_to_uri_lines must emit a hysteria2:// URI carrying the auth as
+# userinfo, host:port from settings, and sni/alpn/insecure query params.
+# (Synthetic placeholder values only — nothing from any real subscription.)
+caseL_in="/tmp/netshift-fb-caseL-$$.json"
+cat > "$caseL_in" << 'XRAYJSON'
+[
+  {
+    "remarks": "HY2 node",
+    "outbounds": [
+      {
+        "protocol": "hysteria",
+        "tag": "hy2-tag",
+        "settings": {"address": "hy.example.com", "port": 8443},
+        "streamSettings": {"network": "hysteria", "security": "tls",
+          "tlsSettings": {"serverName": "hy.example.com",
+            "alpn": ["h3"], "allowInsecure": true},
+          "hysteriaSettings": {"version": 2, "auth": "testpass"}}
+      }
+    ]
+  }
+]
+XRAYJSON
+caseL_uris="$(xray_json_to_uri_lines "$caseL_in" 2>/dev/null)"
+# Exactly one URI emitted, and it is a hysteria2:// scheme.
+caseL_n="$(printf '%s\n' "$caseL_uris" | grep -c .)"
+if [ "$caseL_n" = "1" ] && printf '%s\n' "$caseL_uris" | grep -q '^hysteria2://'; then
+    echo 'fb-caseL-hy2-scheme:OK'
+else
+    echo "fb-caseL-hy2-scheme(n=$caseL_n uris='$caseL_uris'):FAIL"
+fi
+# Auth as userinfo, host:port from settings.
+if printf '%s\n' "$caseL_uris" | grep -q '^hysteria2://testpass@hy.example.com:8443'; then
+    echo 'fb-caseL-hy2-auth-host-port:OK'
+else
+    echo "fb-caseL-hy2-auth-host-port(uris='$caseL_uris'):FAIL"
+fi
+# sni + alpn + insecure query params present; NO type= param.
+if printf '%s\n' "$caseL_uris" | grep -q 'sni=hy.example.com' \
+        && printf '%s\n' "$caseL_uris" | grep -q 'alpn=h3' \
+        && printf '%s\n' "$caseL_uris" | grep -q 'insecure=1' \
+        && ! printf '%s\n' "$caseL_uris" | grep -q 'type='; then
+    echo 'fb-caseL-hy2-query-params:OK'
+else
+    echo "fb-caseL-hy2-query-params(uris='$caseL_uris'):FAIL"
+fi
+rm -f "$caseL_in"
+
+# ── CASE M: Hysteria v1 / missing version → skipped, no fatal ───────
+# The facade has no Hysteria v1 parser; the converter must select out any
+# hysteria node whose hysteriaSettings.version is not 2 (and emit nothing),
+# WITHOUT aborting/fatal. A v2 node in the same doc must still be emitted.
+caseM_in="/tmp/netshift-fb-caseM-$$.json"
+cat > "$caseM_in" << 'XRAYJSON'
+[
+  {
+    "remarks": "HY1 + missing + v2",
+    "outbounds": [
+      {
+        "protocol": "hysteria",
+        "tag": "hy1",
+        "settings": {"address": "v1.example.com", "port": 443},
+        "streamSettings": {"network": "hysteria", "security": "tls",
+          "tlsSettings": {"serverName": "v1.example.com"},
+          "hysteriaSettings": {"version": 1, "auth": "testpass"}}
+      },
+      {
+        "protocol": "hysteria",
+        "tag": "hy-noversion",
+        "settings": {"address": "nov.example.com", "port": 443},
+        "streamSettings": {"network": "hysteria", "security": "tls",
+          "tlsSettings": {"serverName": "nov.example.com"},
+          "hysteriaSettings": {"auth": "testpass"}}
+      },
+      {
+        "protocol": "hysteria",
+        "tag": "hy2",
+        "settings": {"address": "v2.example.com", "port": 443},
+        "streamSettings": {"network": "hysteria", "security": "tls",
+          "tlsSettings": {"serverName": "v2.example.com"},
+          "hysteriaSettings": {"version": 2, "auth": "testpass"}}
+      }
+    ]
+  }
+]
+XRAYJSON
+caseM_uris="$(xray_json_to_uri_lines "$caseM_in" 2>/dev/null)"
+caseM_rc=$?
+# Only the v2 node survives; v1 and missing-version are dropped silently.
+caseM_n="$(printf '%s\n' "$caseM_uris" | grep -c .)"
+if [ "$caseM_n" = "1" ] \
+        && printf '%s\n' "$caseM_uris" | grep -q '@v2.example.com:443' \
+        && ! printf '%s\n' "$caseM_uris" | grep -q 'v1.example.com' \
+        && ! printf '%s\n' "$caseM_uris" | grep -q 'nov.example.com'; then
+    echo 'fb-caseM-v1-and-missing-skipped:OK'
+else
+    echo "fb-caseM-v1-and-missing-skipped(rc=$caseM_rc n=$caseM_n uris='$caseM_uris'):FAIL"
+fi
+rm -f "$caseM_in"
+
+# ── CASE N: mixed vless+trojan+ss+hysteria2 each duplicated → dedup ──
+# Four distinct nodes (one per protocol), each repeated across three configs
+# with only the display tag/remarks differing. The existing $conn dedup must
+# collapse them to exactly the four unique connections, first-seen order
+# preserved (vless, trojan, ss, hysteria2).
+caseN_in="/tmp/netshift-fb-caseN-$$.json"
+cat > "$caseN_in" << 'XRAYJSON'
+[
+  {"remarks": "p1", "outbounds": [
+    {"protocol": "vless", "tag": "vl-1", "settings": {"vnext": [{"address": "vl.example.com", "port": 443,
+      "users": [{"id": "00000000-0000-0000-0000-000000000000", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "ab", "serverName": "vl.example.com", "fingerprint": "firefox"}}},
+    {"protocol": "trojan", "tag": "tj-1", "settings": {"servers": [{"address": "tj.example.com", "port": 8443, "password": "testpass"}]},
+      "streamSettings": {"network": "tcp", "security": "tls", "tlsSettings": {"serverName": "tj.example.com"}}},
+    {"protocol": "shadowsocks", "tag": "ss-1", "settings": {"servers": [{"address": "ss.example.com", "port": 8388, "password": "testpass", "method": "aes-256-gcm"}]},
+      "streamSettings": {"network": "tcp"}},
+    {"protocol": "hysteria", "tag": "hy-1", "settings": {"address": "hy.example.com", "port": 443},
+      "streamSettings": {"network": "hysteria", "security": "tls", "tlsSettings": {"serverName": "hy.example.com"},
+        "hysteriaSettings": {"version": 2, "auth": "testpass"}}}
+  ]},
+  {"remarks": "p2", "outbounds": [
+    {"protocol": "vless", "tag": "vl-2", "settings": {"vnext": [{"address": "vl.example.com", "port": 443,
+      "users": [{"id": "00000000-0000-0000-0000-000000000000", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "ab", "serverName": "vl.example.com", "fingerprint": "firefox"}}},
+    {"protocol": "trojan", "tag": "tj-2", "settings": {"servers": [{"address": "tj.example.com", "port": 8443, "password": "testpass"}]},
+      "streamSettings": {"network": "tcp", "security": "tls", "tlsSettings": {"serverName": "tj.example.com"}}},
+    {"protocol": "shadowsocks", "tag": "ss-2", "settings": {"servers": [{"address": "ss.example.com", "port": 8388, "password": "testpass", "method": "aes-256-gcm"}]},
+      "streamSettings": {"network": "tcp"}},
+    {"protocol": "hysteria", "tag": "hy-2", "settings": {"address": "hy.example.com", "port": 443},
+      "streamSettings": {"network": "hysteria", "security": "tls", "tlsSettings": {"serverName": "hy.example.com"},
+        "hysteriaSettings": {"version": 2, "auth": "testpass"}}}
+  ]},
+  {"remarks": "p3", "outbounds": [
+    {"protocol": "vless", "tag": "vl-3", "settings": {"vnext": [{"address": "vl.example.com", "port": 443,
+      "users": [{"id": "00000000-0000-0000-0000-000000000000", "flow": "xtls-rprx-vision", "encryption": "none"}]}]},
+      "streamSettings": {"network": "tcp", "security": "reality",
+        "realitySettings": {"publicKey": "PK", "shortId": "ab", "serverName": "vl.example.com", "fingerprint": "firefox"}}},
+    {"protocol": "trojan", "tag": "tj-3", "settings": {"servers": [{"address": "tj.example.com", "port": 8443, "password": "testpass"}]},
+      "streamSettings": {"network": "tcp", "security": "tls", "tlsSettings": {"serverName": "tj.example.com"}}},
+    {"protocol": "shadowsocks", "tag": "ss-3", "settings": {"servers": [{"address": "ss.example.com", "port": 8388, "password": "testpass", "method": "aes-256-gcm"}]},
+      "streamSettings": {"network": "tcp"}},
+    {"protocol": "hysteria", "tag": "hy-3", "settings": {"address": "hy.example.com", "port": 443},
+      "streamSettings": {"network": "hysteria", "security": "tls", "tlsSettings": {"serverName": "hy.example.com"},
+        "hysteriaSettings": {"version": 2, "auth": "testpass"}}}
+  ]}
+]
+XRAYJSON
+caseN_uris="$(xray_json_to_uri_lines "$caseN_in" 2>/dev/null)"
+# 12 raw nodes (4 protocols x 3 profiles) collapse to exactly 4 unique conns.
+caseN_n="$(printf '%s\n' "$caseN_uris" | grep -c .)"
+if [ "$caseN_n" = "4" ]; then
+    echo 'fb-caseN-dedup-count(==4):OK'
+else
+    echo "fb-caseN-dedup-count(==4 got $caseN_n uris='$caseN_uris'):FAIL"
+fi
+# First-seen order preserved: vless, trojan, ss, hysteria2 (scheme prefixes).
+caseN_schemes="$(printf '%s\n' "$caseN_uris" | sed -e 's#://.*##' | tr '\n' ',' )"
+if [ "$caseN_schemes" = "vless,trojan,ss,hysteria2," ]; then
+    echo 'fb-caseN-first-seen-order:OK'
+else
+    echo "fb-caseN-first-seen-order(got '$caseN_schemes'):FAIL"
+fi
+rm -f "$caseN_in"
+
+# ── CASE O: end-to-end Hysteria2 through the facade + sing-box check ─
+# Feed the emitted hysteria2:// URI through normalize_subscription_to_singbox
+# (the real subscription path) and assert a hysteria2 outbound is produced
+# with the expected server/port/password and TLS. Then wrap the produced
+# outbounds into a minimal full sing-box config and assert `sing-box check`
+# passes (whole-chain validation; project-core.md §4).
+caseO_in="/tmp/netshift-fb-caseO-$$.json"
+caseO_out="/tmp/netshift-fb-caseO-out-$$.json"
+cat > "$caseO_in" << 'XRAYJSON'
+[
+  {
+    "remarks": "HY2 e2e",
+    "outbounds": [
+      {
+        "protocol": "hysteria",
+        "tag": "hy2-e2e",
+        "settings": {"address": "e2e.example.com", "port": 8443},
+        "streamSettings": {"network": "hysteria", "security": "tls",
+          "tlsSettings": {"serverName": "e2e.example.com", "alpn": ["h3"]},
+          "hysteriaSettings": {"version": 2, "auth": "testpass"}}
+      }
+    ]
+  }
+]
+XRAYJSON
+if normalize_subscription_to_singbox "$caseO_in" "$caseO_out" "testsub"; then
+    echo 'fb-caseO-rc:OK'
+else
+    echo 'fb-caseO-rc:FAIL'
+fi
+if validate_subscription_file "$caseO_out"; then
+    echo 'fb-caseO-validate:OK'
+else
+    echo 'fb-caseO-validate:FAIL'
+fi
+# Exactly one hysteria2 outbound with the expected server/port/password + sni.
+if jq -e '[.outbounds[] | select(.type == "hysteria2"
+        and .server == "e2e.example.com"
+        and .server_port == 8443
+        and .password == "testpass"
+        and .tls.server_name == "e2e.example.com")] | length == 1' \
+        "$caseO_out" > /dev/null 2>&1; then
+    echo 'fb-caseO-hy2-outbound-fields:OK'
+else
+    echo 'fb-caseO-hy2-outbound-fields:FAIL'
+fi
+# Whole-chain: wrap the produced outbounds into a minimal full config and run
+# the real `sing-box check`. Skipped cleanly if the binary is unavailable.
+if command -v sing-box > /dev/null 2>&1; then
+    caseO_full="/tmp/netshift-fb-caseO-full-$$.json"
+    jq '{log: {level: "error"},
+         inbounds: [],
+         outbounds: (.outbounds + [{type: "direct", tag: "direct-out"}]),
+         route: {}}' "$caseO_out" > "$caseO_full" 2>/dev/null
+    if sing-box -c "$caseO_full" check > /dev/null 2>&1; then
+        echo 'fb-caseO-singbox-check:OK'
+    else
+        echo 'fb-caseO-singbox-check:FAIL'
+    fi
+    rm -f "$caseO_full"
+else
+    echo 'fb-caseO-singbox-check:SKIP'
+fi
+rm -f "$caseO_in" "$caseO_out"
 
 echo 'DONE'
 FBEOF
@@ -4817,6 +5313,7 @@ main() {
             test_selective_marking
             test_section_isolation
             test_monitor_fd_hygiene
+            test_unsupported_skip
             test_diagnostics
             test_subscription
             test_insecure_fetch
@@ -4840,6 +5337,7 @@ main() {
         selmark)     test_selective_marking ;;
         isolation)   test_section_isolation ;;
         monfd)       test_monitor_fd_hygiene ;;
+        unsupported) test_unsupported_skip ;;
         diagnostics) test_diagnostics ;;
         subscription) test_subscription ;;
         insecure)    test_insecure_fetch ;;
@@ -4858,7 +5356,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck selfupdate backupguard"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck selfupdate backupguard"
             exit 1
             ;;
     esac

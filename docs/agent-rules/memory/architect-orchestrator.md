@@ -950,3 +950,66 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   is unreachable at reload time. Also its `pid` (~:774) is not local. Worth a
   task to apply the same detach (ideally a shared launcher helper to avoid a 3rd
   copy of the setsid pattern).
+
+## task-037 + task-038: hype-protocol coverage (hysteria2 from Xray + graceful-skip + splithttp) (2026-06-11)
+
+- USER asked: are hysteria2 + xhttp supported EVERYWHERE (url / subscription /
+  urltest / outbound_json)? Audit (explore) produced a full matrix. Key findings:
+  url == urltest == selector (all route through sing_box_cf_add_proxy_outbound —
+  identical support); vless/trojan/ss/hysteria2 + ws/grpc/xhttp covered on those +
+  uri-list subscription + outbound_json; xhttp gated on is_sing_box_extended.
+- OPERATOR CORRECTION (important): I initially concluded "hysteria2 can't be in
+  Xray JSON". WRONG. Real subscriptions (a private.json = 49-element ARRAY of Xray
+  configs, Hiddify/v2rayN-style) carry Hysteria2 as protocol:"hysteria" +
+  streamSettings.hysteriaSettings.{version:2,auth} + settings.address/port +
+  tlsSettings. ALWAYS check a real sample before declaring a protocol absent.
+- PRIVACY: private.json is local-only with real keys/servers. I extracted ONLY
+  structure (field names/types) + aggregate counts via python/jq, redacting all
+  values. Devs/tests used synthetic placeholders only. NEVER leak its values.
+- task-037 (APPROVED, smoke 155/0): added a hysteria branch to
+  xray_json_to_uri_lines — select protocol=="hysteria", gate
+  (hysteriaSettings.version // 0)==2 (v1/missing skipped, no fatal), peer from
+  settings.address/port (not vnext/servers), cred from hysteriaSettings.auth,
+  scheme hysteria->hysteria2, emit hysteria2://auth@host:port?sni&insecure&alpn&obfs
+  (NO type=), all via the existing safe()/kv() no-Oniguruma helpers. REUSED the
+  existing generic $conn dedup (no 2nd dedup/no sort) — collapses the heavy
+  real-world duplication. NO facade change needed (facade already parses
+  hysteria2:// and reads sni/insecure/alpn/obfs/obfs-password).
+- task-038 (APPROVED, smoke 155/0): (a) the `*)` default arm of
+  sing_box_cf_add_proxy_outbound was `log fatal; exit 1` — one unsupported link
+  (tuic/wireguard/etc.) in a url/selector/urltest input ABORTED THE WHOLE CONFIG.
+  Changed to `log warn; echo "$config"; return 1` (graceful skip). CONFIG-WIPE
+  SAFETY pattern (reused from task-033 lesson): every caller does `local _new` on
+  its own line + `if _new=$(...) && [ -n "$_new" ]; then config=$_new`; group
+  member tag added ONLY on success (no dangling urltest/selector member);
+  all-unsupported section -> mark_section_outbound_unavailable (append-only to
+  SUBSCRIPTION_UNAVAILABLE_SECTIONS) -> reject route rule. (b) splithttp (pre-rename
+  name of xhttp) now an alias in the facade transport builder AND
+  xray_json_to_uri_lines (network splithttp->xhttp, xhttpSettings // splithttpSettings,
+  emit type=xhttp; never a literal splithttp downstream). Fixed the false
+  facade comment claiming tuic/hysteria1/anytls/shadowtls were handled.
+- HARDWARE-DATA PROOF on the REAL private.json (in smoke container, aggregates
+  only): xray_json_to_uri_lines emits 363 URIs after dedup (from 3669 outbounds ~
+  10x collapse), of which hysteria2=19 (was 0 before — proves task-037 works on
+  real data), vless 339, trojan 5; type= distribution tcp 29 / ws 301 / grpc 10 /
+  xhttp 4; literal "splithttp" = 0 (normalization works). Facade on clean single
+  calls: vless+tcp -> NO transport (correct), vless+ws -> transport.type=ws.
+- HARNESS LANDMINE (don't repeat): driving sing_box_cf_add_proxy_outbound in a
+  loop over ALL 363 nodes into ONE reused `config`/section var gave a bogus
+  "all 363 transport=ws" + a sing-box-check FAIL — an ARTIFACT of reusing one
+  section/config across hundreds of heterogeneous nodes, NOT a code bug (proven by
+  the clean per-node check above). The REAL subscription path goes through
+  normalize_subscription_to_singbox + the batch builder, which the SHIPPED smoke
+  test (fb-caseO end-to-end + sing-box check, green) exercises correctly. Don't
+  hand-roll a 363-node-into-one-section e2e; trust the smoke harness for config
+  integrity, use the real path or per-node checks.
+- jq-in-shell-string landmines (recorded for backend): an apostrophe inside a jq
+  comment within `jq -er '...'` CLOSES the shell string (SC1073/etc + runtime
+  break) — keep jq comments apostrophe-free; `((` at a jq pipe-element start trips
+  shellcheck as arithmetic — split into single-paren `as` bindings.
+- STILL TODO before/with release: these (task-027..038) are all UNCOMMITTED in the
+  tree, stacked; operator commits manually. The 0.8.6 regressions (033/034) +
+  reload-hang (035/036) + protocol coverage (037/038) are all
+  APPROVED+gated+(033/034/035/036 hardware-verified). task-037/038 verified via
+  smoke 155/0 + real-private.json extraction; full-config sing-box check on the
+  real sub is covered by the shipped smoke (fb-caseO), not my hand harness.

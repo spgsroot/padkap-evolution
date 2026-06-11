@@ -1184,17 +1184,34 @@ xray_json_to_uri_lines() {
           | (.outbounds // [])[]
           | select(type == "object")
           | select(.protocol == "vless" or .protocol == "trojan"
-                   or .protocol == "shadowsocks")
+                   or .protocol == "shadowsocks"
+                   or .protocol == "hysteria")
           # Skip chained / multi-hop outbounds: not representable as one URI.
           | select((.streamSettings.sockopt.dialerProxy // "") == "")
+          # Hysteria here is always Hysteria2 (hysteriaSettings.version == 2);
+          # the facade has no Hysteria v1 parser, so skip v1/missing-version
+          # silently (no fatal). vless/trojan/shadowsocks are unaffected.
+          | select(.protocol != "hysteria"
+                   or ((.streamSettings.hysteriaSettings.version // 0) == 2))
           | . as $ob
           | (.streamSettings // {}) as $ss
-          | ($ss.network // "tcp") as $net
+          # splithttp is the pre-rename name of the xhttp transport (sing-box
+          # renamed it). Normalize it to xhttp so the emitted URI uses the modern
+          # name and the facade xhttp branch handles it. No regex.
+          | ($ss.network // "tcp") as $net_raw
+          | (if $net_raw == "splithttp" then "xhttp" else $net_raw end) as $net
+          # xhttp transport settings live under xhttpSettings, or the pre-rename
+          # splithttpSettings alias.
+          | ($ss.xhttpSettings // $ss.splithttpSettings // {}) as $xs
           | ($ss.security // "") as $sec
           | ($ss.realitySettings // {}) as $reality
           | ($ss.tlsSettings // $ss.realitySettings // {}) as $tls
-          # vnext (vless/vmess) vs servers (trojan/shadowsocks) addressing.
-          | ($ob.settings.vnext[0] // $ob.settings.servers[0] // {}) as $peer
+          # Addressing: vnext (vless/vmess) vs servers (trojan/shadowsocks);
+          # hysteria carries the peer directly in settings.address/settings.port
+          # (no vnext/servers), so branch the peer derivation on protocol.
+          | (if $ob.protocol == "hysteria"
+             then {address: $ob.settings.address, port: $ob.settings.port}
+             else ($ob.settings.vnext[0] // $ob.settings.servers[0] // {}) end) as $peer
           | ($peer.users[0] // {}) as $user
           | ($peer.address // "") as $host
           | ($peer.port // "") as $port
@@ -1220,6 +1237,18 @@ xray_json_to_uri_lines() {
                   (if $sec != "" then ("security=" + ($sec)) else "security=tls" end),
                   kv("sni"; ($tls.serverName // "")),
                   kv("fp"; ($tls.fingerprint // "")) ]
+              elif $ob.protocol == "hysteria" then
+                # Hysteria2: no stream transport, so DO NOT emit type=. The
+                # facade defaults security to tls for hysteria2 and reads
+                # sni/insecure (via _add_outbound_security), obfs/obfs-password.
+                ($ss.hysteriaSettings // {}) as $hy
+                | [ kv("sni"; ($tls.serverName // "")),
+                    (if (($tls.allowInsecure // $tls.insecure // false) == true)
+                     then "insecure=1" else empty end) ]
+                  + (if ($hy.obfs // "") != "" then
+                       [ "obfs=salamander",
+                         kv("obfs-password"; ($hy.obfsPassword // $hy.obfs_password // "")) ]
+                     else [] end)
               else
                 [ ("type=" + $net) ]
               end
@@ -1230,9 +1259,12 @@ xray_json_to_uri_lines() {
                 [ kv("path"; ($ss.wsSettings.path // "")),
                   kv("host"; ($ss.wsSettings.headers.Host // "")) ]
               elif $net == "xhttp" then
-                [ kv("path"; ($ss.xhttpSettings.path // "")),
-                  kv("host"; ($ss.xhttpSettings.host // "")),
-                  kv("mode"; ($ss.xhttpSettings.mode // "")) ]
+                # Accept both the modern xhttpSettings and the pre-rename
+                # splithttpSettings key (network was normalized to xhttp above).
+                # $xs binds to whichever settings object is present.
+                [ kv("path"; ($xs.path // "")),
+                  kv("host"; ($xs.host // "")),
+                  kv("mode"; ($xs.mode // "")) ]
               elif $net == "grpc" then
                 [ kv("serviceName"; ($ss.grpcSettings.serviceName // "")) ]
               else [] end
@@ -1242,12 +1274,17 @@ xray_json_to_uri_lines() {
           | ($base + $transport
              + (if $alpn_str != "" then [ kv("alpn"; $alpn_str) ] else [] end)
              | map(select(. != null and . != ""))) as $query
-          # Credential: uuid for vless, password for trojan/shadowsocks.
+          # Credential: uuid for vless, hysteriaSettings.auth for hysteria,
+          # password for trojan/shadowsocks.
           | (if $ob.protocol == "vless" then ($user.id // "")
+             elif $ob.protocol == "hysteria" then
+               ($ss.hysteriaSettings.auth // "")
              else ($peer.password // $ob.settings.password // "") end) as $cred
           | select($cred != "")
           | ($ob.protocol
-             | if . == "shadowsocks" then "ss" else . end) as $scheme
+             | if . == "shadowsocks" then "ss"
+               elif . == "hysteria" then "hysteria2"
+               else . end) as $scheme
           # The connection part (no #fragment) is the dedup key: providers that
           # ship one server set across many "profiles" repeat identical nodes
           # with only the display name differing, which would otherwise inflate
