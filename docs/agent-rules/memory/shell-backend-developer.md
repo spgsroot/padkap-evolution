@@ -1061,3 +1061,136 @@ findings; keep under ~200 lines.
   Pre-existing `rh-case1/2/6:FAIL` red marks persist (documented task-031 quirk;
   suite still EXIT=0). No registration change needed (selmark already in
   all)/alias/usage/compose).
+
+## task-035: health monitor held the procd lock fd (1000) → reload/restart hang
+
+- ROOT CAUSE (hardware-confirmed to the exact process): `start_sing_box_monitor`
+  launched the long-lived monitor with a bare `monitor_sing_box &`. procd runs
+  every init action while holding its exclusive service lock on **fd 1000**
+  (`/tmp/lock/procd_<name>.lock`) — confirmed canonical (openwrt/packages#12807:
+  "fd 1000 holds the exclusive concurrency lock for init script execution").
+  The bare `&` inherits ALL open fds incl. 1000, so the never-exiting monitor
+  held the procd lock FOREVER → the NEXT `reload`/`restart` blocked on
+  `flock 1000` indefinitely → settings never re-applied (dashboard frozen). The
+  1st reload "worked" only because it WAS the lock holder.
+- FIX (chosen: hidden `__monitor` subcommand + setsid + fd-close, most robust):
+  `start_sing_box_monitor` now launches
+  `setsid /bin/sh -c 'exec 1000>&- 2>/dev/null; exec /usr/bin/netshift __monitor'
+  </dev/null >/dev/null 2>&1 &`. Three independent detachments: (1) `setsid` →
+  own session, out of procd's process group; (2) `exec 1000>&-` closes the
+  inherited lock fd in the child BEFORE the re-exec (exec does NOT close
+  non-CLOEXEC fds — that IS the bug — so the close is mandatory; harmless no-op
+  on the plain `start`/boot path where fd 1000 isn't open); (3)
+  `</dev/null >/dev/null 2>&1` drops procd's inherited stdout/stderr pipes. The
+  hidden `__monitor) monitor_sing_box ;;` dispatch case (bottom of bin/netshift,
+  NOT in help) runs the UNCHANGED detection/recovery loop.
+- WHY re-exec instead of just `{ exec 1000>&-; monitor_sing_box; } &`: re-exec
+  via setsid is more thorough (new session + fresh process, drops EVERYTHING
+  inherited), and is robust even if procd ever changes the lock fd number — but
+  I still close 1000 explicitly as the belt. The detached monitor's recovery
+  path (`stop_main`/`start_main`) is safe: `start_main` does NOT spawn a monitor
+  (only `start()` does, via `start_sing_box_monitor`), so a recovery restart
+  can't re-introduce a lock-held child; and the monitor itself has no fd 1000.
+- PID TRACKING through setsid/exec: the launcher can't reliably capture the
+  final pid of the setsid→sh→exec chain, so the monitor writes its OWN `$$` to
+  the pidfile at the TOP of `monitor_sing_box` (`echo $$ > "$MONITOR_PIDFILE"`).
+  `start_sing_box_monitor` then waits briefly (`while [ ! -s pidfile ]`, ~2s cap,
+  `sleep 0.1 2>/dev/null || sleep 1` busybox-safe) for it to appear, for
+  diagnostics. `stop()` reads the pidfile + `kill` — unchanged behaviour, still
+  kills exactly the detached monitor. Single-instance pidfile guard at the top
+  of `start_sing_box_monitor` (kill-prior / skip-if-alive) is UNCHANGED → still
+  exactly one monitor after N reloads. `shutdown_correctly` honoring + pidfile
+  cleanup on monitor exit (`rm -f "$MONITOR_PIDFILE"`) unchanged.
+- New constant `MONITOR_PIDFILE="/var/run/netshift_monitor.pid"` (constants.sh,
+  Common) replaced the 4 inlined literals (start/stop/monitor + launcher) — was
+  the one repeated magic path. NO sacred value / nft / default_mark touched.
+- KNOWN RELATED RISK (out of task-035 scope, flagged): the deferred subscription
+  retry worker (`start_subscription_startup_retry_worker`) ALSO backgrounds a
+  `while true` loop with a bare `( ... ) &` and so inherits fd 1000 the same
+  way. It usually exits after the first successful `subscription_update`
+  (self-restarts), so it's not the confirmed culprit, but on a box where the sub
+  stays unreachable it could hold the lock too. Candidate for the same setsid
+  detach in a follow-up.
+- TEST: new top-level `test_monitor_fd_hygiene` (alias `monfd`, 4 asserts),
+  placed after `test_section_isolation`. awk-extracts the SHIPPED
+  `start_sing_box_monitor` verbatim, re-pins `MONITOR_PIDFILE`, installs a stub
+  `/usr/bin/netshift` (back-up/restore the real one) whose `__monitor` writes
+  `$$` + sleep-loops. Driver opens fd 1000 on a sentinel lock file + `flock -x`
+  it (exactly like procd), runs the launcher, then asserts: (1) monitor alive +
+  pidfile correct; (2) NO `/proc/<pid>/fd/*` symlink points at the sentinel lock
+  (THE direct fd-hygiene proof — spec test #1); (3) fd 1000 specifically isn't
+  the lock; (4) repeated-reload-no-hang proxy — CLOSE the parent's fd 1000
+  (modeling procd ENDING the action; must NOT `flock -u`, which releases the
+  per-OFD lock for all and masks the bug) then a separate subshell's
+  `flock -n -x` on the same file must acquire immediately. PROVEN discriminator:
+  reverting to `/usr/bin/netshift __monitor &` makes asserts 2/3/4 FAIL (1/3),
+  fix → 4/0. Parsed in the CURRENT shell (`while read < "$out"`, no pipe) so
+  counts are EXACT. Registered all 5 points (all)/case alias/usage/compose).
+- FLOCK SEMANTICS LANDMINE: an advisory flock lives on the open-file-description
+  (OFD), not the fd. A child that inherits the fd shares the SAME OFD, so the
+  lock persists until ALL fds to that OFD close. `flock -u` on ANY of them
+  releases it for everyone — so a test must model procd by CLOSING the fd, never
+  by `flock -u`, or it can't tell the bug from the fix. busybox `flock` supports
+  both `flock -sxun FD` and `flock FILE -c CMD`; I used the FD form in a subshell
+  (`( exec 9>file; flock -n -x 9 )`) for portability.
+- GATES: shellcheck -S error clean (bin/netshift + lib/*.sh + install.sh +
+  tests/entrypoint.sh). `smoke-tests all` = 152 passed / 0 failed (148 baseline
+  + 4 new monfd). Pre-existing `rh-case1/2/6:FAIL` red marks persist (task-031
+  piped-while quirk; suite still EXIT=0). Verified in the NET_ADMIN smoke
+  container that the detached monitor child holds NO sentinel/lock fd.
+
+## task-036: monitor PROCESS LEAK after the task-035 detach (2-3 live monitors)
+
+- ROOT CAUSE (hardware-confirmed): the task-035 setsid detach is correct, but it
+  introduced a leak. Each monitor self-writes its OWN `$$` to MONITOR_PIDFILE at
+  the top of `monitor_sing_box`, so the pidfile only ever remembers the LATEST
+  monitor. `start_sing_box_monitor`'s old replace-guard only `return 0`'d if the
+  pidfile pid was alive (else `rm`'d it) — it NEVER killed the old monitor.
+  reload = `stop(); start()`; `stop()` kills only the pidfile pid. A monitor from
+  a PRIOR reload whose pid was overwritten in the pidfile is invisible to stop()
+  → and because it's detached (setsid → own session, reparented to init) it
+  survives forever → monitors accumulate (pid=X ppid=1 orphan AND newer one both
+  alive; pidfile names only one).
+- FIX (chosen Option 1, robust kill-all by unique marker): new private helper
+  `_kill_stale_sing_box_monitors` kills ALL detached monitors via
+  `pgrep -f "/usr/bin/netshift __monitor"` (the hidden `__monitor` subcommand is
+  the unique marker — re-exec'd argv is `/bin/ash /usr/bin/netshift __monitor`;
+  matches ONLY the monitor, never the main netshift process). EXCLUDES `$$` and
+  `${PPID:-0}` (numeric-guarded), so it can never self-kill. Wired into TWO
+  paths: (1) `start_sing_box_monitor` runs it + `rm -f pidfile` then ALWAYS
+  spawns one fresh monitor (replaced the old return-0-if-alive guard — a stale
+  monitor from a prior config is not a valid substitute for one bound to the new
+  sing-box run); (2) `stop()` runs it after the pidfile-pid kill so a clean stop
+  leaves ZERO monitors. Result: exactly ONE monitor after N reloads/restarts.
+- SELF-KILL SAFETY during recovery: `monitor_sing_box` recovery calls
+  `stop_main`/`start_main` — NOT `stop()`/`start_sing_box_monitor` — so the
+  kill-all helper is NEVER reached from inside a running monitor. The `$$`/`$PPID`
+  exclusion is the belt-and-suspenders guarantee regardless.
+- KEEP INTACT (re-verified by smoke): task-035 detach (setsid + `exec 1000>&-` +
+  hidden `__monitor` + monitor self-writes pid), monitor holds NO lock fd
+  (re-proven on the RESPAWNED monitor too), reload no-hang, recovery via
+  stop_main/start_main. No sacred value / nft / default_mark touched.
+- `pgrep -f` IS available on busybox target (already used at bin:3974
+  `pgrep -f "sing-box"` in get_system_info, and bin:1062 `pgrep "sing-box"`); I
+  still added a `ps w | grep | grep -v grep | awk` fallback guarded by
+  `command -v pgrep`. Capture pgrep output into a var, iterate with a `for`
+  (word-split is fine — pids are numeric), not a pipe, so the `killed` counter
+  survives.
+- TEST: extended `test_monitor_fd_hygiene` (monfd) with 3 new asserts (now 7
+  total, no new registration — monfd already in all)). awk-extracts BOTH the
+  shipped `_kill_stale_sing_box_monitors` AND `start_sing_box_monitor`. Models
+  the REAL leak precondition before the 2nd launch: monitor A still alive but
+  pidfile pointed at a DEAD pid (`echo 999999 > pidfile`) — exactly the
+  overwritten-then-cleared pidfile state. New asserts: `monfd-prior-monitor-killed`
+  (old pid dead), `monfd-exactly-one-monitor` (pgrep -f count == 1, into file +
+  counted `while read`, no pipe), `monfd-respawn-no-lock-fd` (the NEW monitor
+  also holds no sentinel fd). PROVEN DISCRIMINATOR: reverting to the old guard
+  (return-0-if-alive + neutered selector) makes the buggy code show "found 2 live
+  monitors" + "old pid still alive" (2/7 FAIL); fix → 7/0. The naive
+  "launch twice with the SAME live pidfile" does NOT discriminate (old guard
+  `return 0`s, never respawns, so count stays 1) — you MUST simulate the lost
+  pidfile pointer to expose the leak.
+- GATES: shellcheck -S error clean (bin + lib/*.sh + install.sh +
+  tests/entrypoint.sh). `smoke-tests all` = 155 passed / 0 failed (152 task-035
+  baseline + 3 new monfd asserts). Pre-existing `rh-case1/2/6:FAIL` red marks
+  persist (task-031 piped-while quirk; suite EXIT=0).

@@ -915,38 +915,134 @@ start() {
     start_sing_box_monitor
 }
 
-start_sing_box_monitor() {
-    local pidfile="/var/run/netshift_monitor.pid"
-    local pid
+_kill_stale_sing_box_monitors() {
+    # task-036: kill ALL detached health-monitor processes, not just the one
+    # currently named in MONITOR_PIDFILE.
+    #
+    # Why this is needed: each monitor self-writes its OWN $$ to MONITOR_PIDFILE
+    # at the top of monitor_sing_box (task-035), so the pidfile only ever
+    # remembers the LATEST monitor. A monitor spawned by a PRIOR reload whose pid
+    # was overwritten in the pidfile is invisible to stop() (which kills only the
+    # pidfile pid) → since the monitor is detached via setsid (own session,
+    # reparented to init) it survives stop()/reload forever → monitors leak
+    # (2-3 live monitors instead of exactly 1) after repeated reloads.
+    #
+    # The hidden `__monitor` subcommand is a unique, stable marker that matches
+    # ONLY the detached monitor (the re-exec'd argv is
+    # `/bin/ash /usr/bin/netshift __monitor`) and never the main netshift process
+    # or any other invocation. We MUST exclude our OWN pid ($$) and our parent
+    # ($PPID): the recovery path inside monitor_sing_box calls stop_main/start_main
+    # (NOT stop()/start_sing_box_monitor), so this helper is never reached from
+    # recovery — but excluding self is the belt that guarantees a monitor can
+    # never kill ITSELF even if a future caller wires this into a monitor-reachable
+    # path.
+    local selector="/usr/bin/netshift __monitor"
+    local self="$$"
+    local parent="${PPID:-0}"
+    local mpids mpid killed=0
 
-    # Guard against double-start / procd re-trigger: if a monitor is already
-    # alive, do not spawn a second one (the old pid would be lost, orphaning a
-    # monitor that stop() can no longer kill). Mirror the pidfile-guard idiom
-    # used by start_subscription_startup_retry_worker.
-    if [ -f "$pidfile" ]; then
-        pid="$(cat "$pidfile" 2> /dev/null)"
-        if [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; then
-            log "sing-box health monitor is already running with PID $pid" "debug"
-            return 0
-        fi
-        rm -f "$pidfile"
+    if command -v pgrep > /dev/null 2>&1; then
+        # busybox pgrep supports -f (full-command-line match); already used by
+        # get_system_info (`pgrep -f "sing-box"`). Capture into a var and iterate
+        # with a counted `for` (no pipe) so the killed counter survives.
+        mpids="$(pgrep -f "$selector" 2> /dev/null)"
+    else
+        # Fallback for the rare box without pgrep: ps | grep, busybox-safe. Match
+        # the unique `__monitor` marker, drop the grep line itself.
+        mpids="$(ps w 2> /dev/null | grep "$selector" | grep -v grep | awk '{print $1}')"
     fi
 
-    monitor_sing_box &
-    echo $! > "$pidfile"
-    log "Started sing-box health monitor with PID $!" "info"
+    for mpid in $mpids; do
+        [ -n "$mpid" ] || continue
+        # Numeric guard (defensive: ps formats vary across busybox builds).
+        case "$mpid" in
+            *[!0-9]*) continue ;;
+        esac
+        # Never kill ourselves or our parent (the init/reload action).
+        [ "$mpid" = "$self" ] && continue
+        [ "$mpid" = "$parent" ] && continue
+        if kill -0 "$mpid" 2> /dev/null; then
+            kill "$mpid" 2> /dev/null
+            killed=$((killed + 1))
+        fi
+    done
+
+    if [ "$killed" -gt 0 ]; then
+        log "Terminated $killed stale sing-box health monitor(s)" "info"
+    fi
+}
+
+start_sing_box_monitor() {
+    local pidfile="$MONITOR_PIDFILE"
+    local pid waited
+
+    # task-036: reliably terminate EVERY prior monitor before spawning a new one,
+    # so exactly ONE monitor exists after any number of reloads/restarts. The old
+    # "return 0 if the pidfile pid is alive" guard was insufficient: a reload runs
+    # stop() (kills only the pidfile pid) then start() → here. Because each
+    # monitor overwrites the pidfile with its own pid, monitors from prior reloads
+    # were never recorded → never killed → leaked (orphaned, reparented to init by
+    # setsid). Killing ALL `__monitor` procs (excluding self/parent) closes that
+    # gap. We then ALWAYS spawn a fresh monitor bound to the just-(re)started
+    # sing-box, instead of skipping — a stale monitor from a prior config is not a
+    # valid substitute for one bound to the new run.
+    _kill_stale_sing_box_monitors
+    rm -f "$pidfile"
+
+    # CRITICAL (task-035): the health monitor is a long-lived `while true` loop.
+    # When start_main runs on the reload/restart path, procd holds its init
+    # service lock on fd 1000 (/tmp/lock/procd_<name>.lock). A bare
+    # `monitor_sing_box &` inherits ALL open fds, including fd 1000, so the
+    # monitor would hold the procd lock FOREVER and the NEXT reload/restart
+    # would block on `flock 1000` indefinitely (settings never re-applied).
+    #
+    # Detach the monitor from procd entirely:
+    #   - `setsid` puts it in its own session (no controlling terminal, not in
+    #     procd's process group), and re-execs /usr/bin/netshift fresh.
+    #   - `exec 1000>&-` closes the inherited procd lock fd in the child before
+    #     the re-exec, so even though exec does NOT close non-CLOEXEC fds, fd
+    #     1000 is already gone (harmless no-op on the plain start/boot path
+    #     where the lock fd is absent).
+    #   - `</dev/null >/dev/null 2>&1` drops the inherited stdio (procd's
+    #     stdout/stderr pipes) so the monitor never keeps those open either.
+    # The re-exec runs the hidden `__monitor` subcommand, which calls the
+    # existing monitor_sing_box function (detection/recovery logic unchanged)
+    # and writes its OWN pid to the pidfile (so stop() can still kill it
+    # regardless of how setsid forks/execs the chain).
+    setsid /bin/sh -c 'exec 1000>&- 2>/dev/null; exec /usr/bin/netshift __monitor' < /dev/null > /dev/null 2>&1 &
+
+    # The monitor child writes its real pid to the pidfile itself; wait briefly
+    # for it to appear so callers/diagnostics see a populated pidfile.
+    waited=0
+    while [ ! -s "$pidfile" ] && [ "$waited" -lt 20 ]; do
+        sleep 0.1 2> /dev/null || sleep 1
+        waited=$((waited + 1))
+    done
+
+    if [ -s "$pidfile" ]; then
+        pid="$(cat "$pidfile" 2> /dev/null)"
+        log "Started sing-box health monitor with PID $pid" "info"
+    else
+        log "Started sing-box health monitor (pid pending)" "info"
+    fi
 }
 
 stop() {
-    if [ -f /var/run/netshift_monitor.pid ]; then
+    if [ -f "$MONITOR_PIDFILE" ]; then
         local monitor_pid
-        monitor_pid="$(cat /var/run/netshift_monitor.pid 2>/dev/null)"
+        monitor_pid="$(cat "$MONITOR_PIDFILE" 2>/dev/null)"
         if [ -n "$monitor_pid" ] && kill -0 "$monitor_pid" 2>/dev/null; then
             kill "$monitor_pid" 2>/dev/null
             log "Stopped sing-box health monitor" "info"
         fi
-        rm -f /var/run/netshift_monitor.pid
+        rm -f "$MONITOR_PIDFILE"
     fi
+
+    # task-036: the pidfile only ever names the LATEST monitor, so a leaked
+    # monitor from a prior reload (detached via setsid, reparented to init) is
+    # invisible above. Reap ALL detached `__monitor` processes here so a clean
+    # stop leaves zero monitors running. Excludes self/parent.
+    _kill_stale_sing_box_monitors
 
     local dont_touch_dhcp
     config_get_bool dont_touch_dhcp "settings" "dont_touch_dhcp" 0
@@ -964,6 +1060,11 @@ monitor_sing_box() {
     local crash_count=0
     local backoff=0
     local dont_touch_dhcp
+
+    # Record our OWN pid (task-035): the monitor runs detached via setsid, so
+    # the launcher cannot reliably capture the final pid of the exec/setsid
+    # chain. Writing $$ here is authoritative for stop()/diagnostics.
+    echo $$ > "$MONITOR_PIDFILE"
 
     while true; do
         sleep "$MONITOR_CHECK_INTERVAL"
@@ -1017,7 +1118,7 @@ monitor_sing_box() {
         fi
     done
 
-    rm -f /var/run/netshift_monitor.pid
+    rm -f "$MONITOR_PIDFILE"
 }
 
 sing_box_process_exists() {
@@ -4757,6 +4858,13 @@ restart)
     ;;
 main)
     main
+    ;;
+__monitor)
+    # Hidden subcommand (task-035): runs the detached sing-box health monitor.
+    # Launched only by start_sing_box_monitor via setsid with the procd lock fd
+    # (1000) closed, so the long-lived monitor never holds the procd service
+    # lock. Not part of the public CLI / help.
+    monitor_sing_box
     ;;
 list_update)
     list_update

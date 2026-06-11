@@ -38,6 +38,11 @@ CLOUDFLARE_OCTETS="8.47 162.159 188.114" # Endpoints https://github.com/ampeteli
 JQ_REQUIRED_VERSION="1.7.1"
 COREUTILS_BASE64_REQUIRED_VERSION="9.7"
 RT_TABLE_NAME="netshift"
+# Pidfile of the detached sing-box health monitor (task-035). The monitor is a
+# long-lived `while true` loop launched via setsid with the procd lock fd (1000)
+# closed, so it does NOT hold the procd service lock and consecutive
+# reload/restart never block on flock. The monitor writes its own pid here.
+MONITOR_PIDFILE="/var/run/netshift_monitor.pid"
 
 ## nft
 NFT_TABLE_NAME="NetShiftTable"

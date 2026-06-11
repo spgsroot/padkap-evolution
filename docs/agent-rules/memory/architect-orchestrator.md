@@ -890,3 +890,63 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   respawn / the monitor re-applying the service ruleset; to test create_nft_rules
   in isolation you must disable the service (shutdown_correctly=1 + kill monitor)
   or do it in the smoke container, not on a live procd-managed router.
+
+## task-035 + task-036: monitor procd-lock hang + monitor leak (2026-06-11)
+
+- USER (Oleg): changing subscription settings does nothing — dashboard frozen,
+  no new logs. CONFIRMED ON HARDWARE (clean reboot, not a session artifact): 1st
+  reload after boot completes, 2nd+ reload HANG forever → settings never applied.
+- ROOT (task-035): start_main launches the health monitor as a bare
+  `monitor_sing_box &`. procd runs init actions holding the service lock on
+  fd 1000 (/tmp/lock/procd_<name>.lock — confirmed canonical via
+  openwrt/packages#12807). The bare `&` inherits fd 1000; the monitor is an
+  infinite loop so it holds the procd lock FOREVER → next reload/restart blocks
+  on `flock 1000` indefinitely. Hardware proof: the process holding
+  procd_netshift.lock == netshift_monitor.pid, child `sleep 10`; subsequent
+  reload wrappers stacked on `flock 1000`.
+- FIX (task-035, APPROVED review-001): launch the monitor detached —
+  `setsid /bin/sh -c 'exec 1000>&- 2>/dev/null; exec /usr/bin/netshift __monitor'
+  </dev/null >/dev/null 2>&1 &` + a hidden `__monitor` CLI dispatch case +
+  monitor self-writes $$ to MONITOR_PIDFILE (new constant). CRITICAL: `setsid`
+  ALONE does NOT close fd 1000 (busybox sets no CLOEXEC) — the explicit
+  `exec 1000>&-` is load-bearing (the fd-hygiene test must fail the setsid-only
+  variant too, and it does). smoke 152/0.
+- task-035 INTRODUCED A LEAK (caught on hardware): each detached monitor
+  self-writes $$ to the pidfile, so the pidfile only remembers the LATEST
+  monitor; stop()/reload kills only that one; monitors from prior reloads
+  (orphaned to init by setsid) survive → accumulate.
+- FIX (task-036, APPROVED review-002): `_kill_stale_sing_box_monitors()` reaps
+  ALL detached monitors by the unique `__monitor` argv marker
+  (`pgrep -f "/usr/bin/netshift __monitor"`), with numeric `$$`/`${PPID:-0}`
+  self/parent exclusion, called from BOTH stop() and start_sing_box_monitor
+  (which now reaps + rm pidfile + ALWAYS spawns one fresh, replacing the old
+  "return 0 if alive" guard). Reachable ONLY from start()/stop(), NOT from
+  monitor recovery (which uses stop_main/start_main) → can't self-kill. smoke
+  155/0, discriminator real (old guard → 2/7 FAIL).
+- HARDWARE-MEASUREMENT LANDMINE (cost me ~10 probes of false "2-3 monitors"):
+  counting monitors on a slow armv7 router via `pgrep -f netshift __monitor` or
+  per-pid `ls /proc + cat /proc/$p/cmdline` is UNRELIABLE — (a) `pgrep -f`
+  substring-matches YOUR OWN diagnostic `ash -c '...__monitor...'` shell, and
+  (b) iterating `ls /proc` then reading each `/stat` races transient child
+  processes of your own command that die mid-read (show as alive in `kill -0`
+  then "no such file"). USE A SINGLE ATOMIC SNAPSHOT: `ps w > /tmp/s.txt` then
+  `grep "ash /usr/bin/netshift __monitor" /tmp/s.txt | grep -v grep`. That gave
+  the truth: exactly ONE real monitor after reboot AND after 3 reloads. Always
+  verify process counts on-device with an atomic `ps` snapshot, never live
+  pgrep/proc-walk.
+- FINAL HARDWARE STATE (0.8.8, atomic ps): sing-box 1, monitors 1, stuck reloads
+  0, procd-lock holders 0, nft mark-all 0 / selective 2 (task-034),
+  route.default_mark 2097152 (task-033), internet OK, reloads no longer hang.
+  ALL of task-033/034/035/036 verified working together on OWRT25/apk hardware.
+- apk INSTALL on OWRT25 (reconfirmed): to land new files use `apk add
+  --no-scripts` (skips the post-install/upgrade trigger that hangs on the
+  network-blocking service start — landmine #B) + bump the version (equal-version
+  no-overwrite — landmine #A), then start the service manually. `--no-scripts`
+  is the clean workaround for the hanging trigger.
+- OUTSTANDING FOLLOW-UP (review-001 M1 / review-002 M3, NOT fixed):
+  `start_subscription_startup_retry_worker` (~netshift:770-808) backgrounds an
+  infinite `( … ) &` from start_main with NO setsid / NO `exec 1000>&-` → SAME
+  fd-1000 inheritance class; can re-introduce a reload hang when a subscription
+  is unreachable at reload time. Also its `pid` (~:774) is not local. Worth a
+  task to apply the same detach (ideally a shared launcher helper to avoid a 3rd
+  copy of the setsid pattern).

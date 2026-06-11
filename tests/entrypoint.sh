@@ -1012,6 +1012,305 @@ SIEOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: Monitor procd-lock fd hygiene (task-035) + monitor-leak (task-036)
+#
+# ROOT CAUSE under test: the long-lived health monitor used to be launched with
+# a bare `monitor_sing_box &`, which inherited ALL open fds — including procd's
+# init service lock on fd 1000 (/tmp/lock/procd_<name>.lock). The monitor then
+# held that lock forever, so the NEXT reload/restart blocked on `flock 1000`
+# indefinitely and settings were never re-applied.
+#
+# The fix launches the monitor via `setsid /bin/sh -c 'exec 1000>&- ...; exec
+# /usr/bin/netshift __monitor' </dev/null >/dev/null 2>&1 &` so the detached
+# monitor holds NO procd fds. This test reproduces the fd-inheritance scenario
+# deterministically:
+#   1. The parent opens fd 1000 onto a sentinel lock file and takes an exclusive
+#      flock on it (exactly how procd serializes init actions).
+#   2. We awk-extract the SHIPPED start_sing_box_monitor verbatim and run it with
+#      MONITOR_PIDFILE re-pinned to a temp path and /usr/bin/netshift replaced by
+#      a stub whose `__monitor` runs a tiny pid-writing sleep loop (so the real
+#      launch mechanism — setsid + fd-close + re-exec — is exercised end to end).
+#   3. Assert: the monitor child's /proc/<pid>/fd does NOT reference the sentinel
+#      lock file (fd 1000 was closed), the monitor is alive, the pidfile is
+#      correct, and a fresh non-blocking flock on the sentinel acquires
+#      immediately (it WOULD block before the fix because the monitor inherited
+#      the held lock).
+#
+# task-036 (monitor-leak follow-up): the task-035 detach is correct, but because
+# each monitor self-writes its OWN $$ to MONITOR_PIDFILE, the pidfile only ever
+# remembers the LATEST monitor; stop() kills only that pid, so monitors from
+# PRIOR reloads (detached, reparented to init) leaked (2-3 live monitors). Fix:
+# start_sing_box_monitor (and stop()) now run _kill_stale_sing_box_monitors,
+# which kills ALL `__monitor` procs (excluding self/parent) via `pgrep -f`.
+#   4. Launch the monitor a SECOND time (modeling a 2nd reload's start phase) and
+#      assert the prior monitor is dead, EXACTLY ONE __monitor process survives
+#      (no accumulation), and the respawned monitor also holds no lock fd.
+# ─────────────────────────────────────────────────────────────────
+test_monitor_fd_hygiene() {
+    header "Monitor procd-lock fd Hygiene (task-035) + leak (task-036)"
+
+    local bin="${NETSHIFT_SRC}/usr/bin/netshift"
+    if [ ! -r "$bin" ]; then
+        skip "netshift bin not found"
+        return
+    fi
+    if ! command -v setsid > /dev/null 2>&1; then
+        skip "setsid not available"
+        return
+    fi
+    if ! command -v flock > /dev/null 2>&1; then
+        skip "flock not available"
+        return
+    fi
+
+    local work="/tmp/netshift-monfd-$$"
+    rm -rf "$work"
+    mkdir -p "$work/bin"
+
+    local pidfile="$work/monitor.pid"
+    local lockfile="$work/procd_sentinel.lock"
+    local fakecli="$work/bin/netshift"
+    local out="$work/out.txt"
+    local livefile="$work/live.txt"
+    : > "$lockfile"
+
+    # Stub /usr/bin/netshift: only its hidden `__monitor` path matters here. It
+    # mimics the real monitor: write its own pid, then sleep-loop (so it is a
+    # long-lived child we can inspect). It inherits MONITOR_PIDFILE via env.
+    cat > "$fakecli" << 'FAKECLI'
+#!/bin/sh
+case "$1" in
+__monitor)
+    echo $$ > "$MONITOR_PIDFILE"
+    while true; do sleep 1; done
+    ;;
+*)
+    exit 0
+    ;;
+esac
+FAKECLI
+    chmod +x "$fakecli"
+
+    # The shipped start_sing_box_monitor hardcodes `/usr/bin/netshift __monitor`.
+    # Install the stub at that absolute path; back up any existing real binary
+    # and restore it afterwards (the smoke container ships none, but be safe).
+    local real_cli="/usr/bin/netshift"
+    local real_cli_bak=""
+    if [ -e "$real_cli" ]; then
+        real_cli_bak="$work/real_cli.bak"
+        cp -p "$real_cli" "$real_cli_bak" 2>/dev/null || real_cli_bak=""
+    fi
+    mkdir -p /usr/bin
+    cp "$fakecli" "$real_cli"
+    chmod +x "$real_cli"
+
+    local drv="$work/driver.sh"
+    cat > "$drv" << 'MONEOF'
+# Quiet logger + the constant the extracted function references.
+log() { :; }
+MONITOR_PIDFILE="DRV_PIDFILE"
+
+# Pull the SHIPPED helper + launcher out of the live bin so we test the real
+# mechanism (task-036 leak fix: start_sing_box_monitor now calls
+# _kill_stale_sing_box_monitors before spawning).
+eval "$(awk '/^_kill_stale_sing_box_monitors\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "DRV_BIN")"
+eval "$(awk '/^start_sing_box_monitor\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "DRV_BIN")"
+
+# Simulate procd: open fd 1000 onto the sentinel lock file and hold an
+# exclusive flock on it (this is exactly what procd does while running an init
+# action). The launcher must NOT let the detached monitor inherit this fd.
+exec 1000> "DRV_LOCKFILE"
+flock -x 1000
+
+# Launch the monitor via the SHIPPED code path (setsid + fd-close + re-exec).
+start_sing_box_monitor
+
+# Give the detached child a moment to write its pid (the launcher already waits,
+# but the re-exec/setsid chain may lag slightly under the container).
+i=0
+while [ ! -s "$MONITOR_PIDFILE" ] && [ "$i" -lt 50 ]; do
+    sleep 0.1 2>/dev/null || sleep 1
+    i=$((i + 1))
+done
+
+mpid="$(cat "$MONITOR_PIDFILE" 2>/dev/null)"
+
+# ── Assert 1: pidfile populated with a live pid. ─────────────────────────────
+if [ -n "$mpid" ] && kill -0 "$mpid" 2>/dev/null; then
+    echo 'monfd-monitor-alive-pidfile:OK'
+else
+    echo "monfd-monitor-alive-pidfile:FAIL (pid='$mpid')"
+fi
+
+# ── Assert 2: the monitor child does NOT have the sentinel lock fd open. We
+#    resolve every /proc/<pid>/fd symlink and assert none points at the lock
+#    file (the procd lock fd 1000 was closed before the re-exec). ─────────────
+held=0
+if [ -n "$mpid" ] && [ -d "/proc/$mpid/fd" ]; then
+    for fd in /proc/"$mpid"/fd/*; do
+        [ -e "$fd" ] || continue
+        tgt="$(readlink "$fd" 2>/dev/null)"
+        case "$tgt" in
+            *procd_sentinel.lock*) held=1 ;;
+        esac
+    done
+fi
+if [ "$held" -eq 0 ]; then
+    echo 'monfd-no-sentinel-lock-fd:OK'
+else
+    echo 'monfd-no-sentinel-lock-fd:FAIL (monitor still holds the lock fd)'
+fi
+
+# ── Assert 3: fd 1000 specifically is not the sentinel lock in the child. ────
+if [ -n "$mpid" ] && [ -e "/proc/$mpid/fd/1000" ]; then
+    t1000="$(readlink "/proc/$mpid/fd/1000" 2>/dev/null)"
+    case "$t1000" in
+        *procd_sentinel.lock*) echo 'monfd-fd1000-not-lock:FAIL' ;;
+        *) echo 'monfd-fd1000-not-lock:OK' ;;
+    esac
+else
+    echo 'monfd-fd1000-not-lock:OK'
+fi
+
+# ── Assert 4 (repeated-reload no-hang proxy): a fresh non-blocking flock on the
+#    SAME sentinel must acquire immediately. Before the fix the inherited fd
+#    1000 would keep the lock held by the live monitor and this would block /
+#    fail. We drop the parent's own flock first (procd releases the lock when
+#    the action returns), then a separate process tries flock -n. ─────────────
+# Model procd ending the init action: it simply CLOSES its fd 1000 (it does NOT
+# explicitly unlock). The advisory flock lives on the open-file-description, so
+# if the monitor child inherited fd 1000 (the bug) the SAME OFD stays open in
+# the child and the lock persists; with the fix the child never had that OFD, so
+# closing the parent's fd here releases the lock. We must NOT `flock -u` (that
+# would release the per-OFD lock for everyone and mask the bug).
+exec 1000>&- 2>/dev/null
+# A separate subshell opens its OWN fd onto the same lock file and tries a
+# non-blocking exclusive flock. If the detached monitor still held the lock
+# (the bug), this blocks/fails; with the fix it acquires instantly.
+if ( exec 9> "DRV_LOCKFILE"; flock -n -x 9 ) 2>/dev/null; then
+    echo 'monfd-second-flock-immediate:OK'
+else
+    echo 'monfd-second-flock-immediate:FAIL (monitor still holds the lock)'
+fi
+
+# ── Assert 5 (task-036 monitor-leak fix): launching the monitor AGAIN (modeling
+#    a SECOND reload's start phase) must reliably kill the prior monitor and
+#    leave EXACTLY ONE __monitor process alive — no accumulation. Before the fix
+#    (return-0-if-alive + pidfile-only kill) the first monitor leaked because the
+#    pidfile only ever named the latest one. We count survivors via pgrep -f on
+#    the unique `__monitor` marker, into a temp file + counted `while read` (no
+#    pipe) so the count is exact. ─────────────────────────────────────────────
+prev_mpid="$mpid"
+
+# Model the REAL leak precondition: monitor A is still alive (from a prior
+# reload cycle) but the pidfile no longer points at it — exactly what happens
+# because each monitor overwrites the pidfile with its own $$, so A's pid record
+# is lost once a later monitor wrote, and stop() then cleared the pidfile while
+# killing only the LATEST pid. We simulate that by pointing the pidfile at a
+# dead pid. With the OLD guard, the launcher would see a dead pidfile pid,
+# `rm -f` it, and spawn B — leaving A orphaned (2 live monitors). The task-036
+# kill-all must terminate A regardless of the pidfile.
+echo 999999 > "$MONITOR_PIDFILE"   # a pid that is not alive
+
+# Re-open + re-hold the sentinel lock to model procd serializing the 2nd action,
+# so we also re-prove fd hygiene on the freshly spawned monitor.
+exec 1000> "DRV_LOCKFILE"
+flock -x 1000
+
+start_sing_box_monitor
+
+i=0
+while [ ! -s "$MONITOR_PIDFILE" ] && [ "$i" -lt 50 ]; do
+    sleep 0.1 2>/dev/null || sleep 1
+    i=$((i + 1))
+done
+mpid2="$(cat "$MONITOR_PIDFILE" 2>/dev/null)"
+
+# The previous monitor must be dead (reliably killed before the new spawn).
+if [ -n "$prev_mpid" ] && kill -0 "$prev_mpid" 2>/dev/null; then
+    echo "monfd-prior-monitor-killed:FAIL (old pid $prev_mpid still alive)"
+else
+    echo 'monfd-prior-monitor-killed:OK'
+fi
+
+# Exactly one live __monitor process must remain. Count with pgrep -f (the same
+# selector the fix uses) into a file, then a counted loop (no pipe).
+livecount=0
+livefile="DRV_LIVEFILE"
+pgrep -f "/usr/bin/netshift __monitor" 2>/dev/null > "$livefile" || true
+while IFS= read -r lp; do
+    [ -n "$lp" ] || continue
+    case "$lp" in *[!0-9]*) continue ;; esac
+    if kill -0 "$lp" 2>/dev/null; then
+        livecount=$((livecount + 1))
+    fi
+done < "$livefile"
+if [ "$livecount" -eq 1 ]; then
+    echo 'monfd-exactly-one-monitor:OK'
+else
+    echo "monfd-exactly-one-monitor:FAIL (found $livecount live monitors)"
+fi
+
+# The freshly spawned (2nd) monitor must also hold NO sentinel lock fd.
+held2=0
+if [ -n "$mpid2" ] && [ -d "/proc/$mpid2/fd" ]; then
+    for fd in /proc/"$mpid2"/fd/*; do
+        [ -e "$fd" ] || continue
+        tgt="$(readlink "$fd" 2>/dev/null)"
+        case "$tgt" in
+            *procd_sentinel.lock*) held2=1 ;;
+        esac
+    done
+fi
+if [ "$held2" -eq 0 ]; then
+    echo 'monfd-respawn-no-lock-fd:OK'
+else
+    echo 'monfd-respawn-no-lock-fd:FAIL (respawned monitor holds the lock fd)'
+fi
+
+exec 1000>&- 2>/dev/null
+
+# Clean up the monitor child(ren).
+[ -n "$mpid2" ] && kill "$mpid2" 2>/dev/null
+[ -n "$prev_mpid" ] && kill "$prev_mpid" 2>/dev/null
+echo 'DONE'
+MONEOF
+
+    sed -i \
+        -e "s|DRV_PIDFILE|$pidfile|g" \
+        -e "s|DRV_BIN|$bin|g" \
+        -e "s|DRV_LOCKFILE|$lockfile|g" \
+        -e "s|DRV_LIVEFILE|$livefile|g" \
+        "$drv"
+
+    MONITOR_PIDFILE="$pidfile" ash "$drv" > "$out" 2>/dev/null || true
+
+    # Parse in the CURRENT shell (no pipe) so PASS/FAIL counts are exact.
+    while IFS= read -r line; do
+        case "$line" in
+            *:OK) pass "$line" ;;
+            *:FAIL*) fail "$line" ;;
+            *:SKIP) skip "$line" ;;
+            *) ;;
+        esac
+    done < "$out"
+
+    # Belt-and-suspenders: kill any leftover stub monitor and restore the cli.
+    if [ -s "$pidfile" ]; then
+        local leftover
+        leftover="$(cat "$pidfile" 2>/dev/null)"
+        [ -n "$leftover" ] && kill "$leftover" 2>/dev/null || true
+    fi
+    if [ -n "$real_cli_bak" ]; then
+        cp -p "$real_cli_bak" "$real_cli" 2>/dev/null || true
+    else
+        rm -f "$real_cli" 2>/dev/null || true
+    fi
+
+    rm -rf "$work"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Test: sing-box Config Generation
 # ─────────────────────────────────────────────────────────────────
 test_sing_box_config() {
@@ -4517,6 +4816,7 @@ main() {
             test_nft_ipv6
             test_selective_marking
             test_section_isolation
+            test_monitor_fd_hygiene
             test_diagnostics
             test_subscription
             test_insecure_fetch
@@ -4539,6 +4839,7 @@ main() {
         nftv6)       test_nft_ipv6 ;;
         selmark)     test_selective_marking ;;
         isolation)   test_section_isolation ;;
+        monfd)       test_monitor_fd_hygiene ;;
         diagnostics) test_diagnostics ;;
         subscription) test_subscription ;;
         insecure)    test_insecure_fetch ;;
@@ -4557,7 +4858,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck selfupdate backupguard"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck selfupdate backupguard"
             exit 1
             ;;
     esac
