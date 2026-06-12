@@ -5306,6 +5306,123 @@ DRVEOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: NetShift latest-tag parse — minified vs pretty JSON (task-047)
+# ─────────────────────────────────────────────────────────────────
+# Guards the false-"outdated" bug: updates_netshift_latest_tag used a
+# field-positional grep|cut that, on MINIFIED GitHub JSON (whole object on one
+# line, "url" before "tag_name"), returned the release "url" instead of the tag
+# — causing a false "outdated" + a self-update that downloaded a garbage
+# "version". The fix parses with jq '.tag_name // empty' (format-independent).
+#
+# We exercise the REAL parse: the driver sources updater.sh and stubs ONLY the
+# network boundary (updates_http_get_once) with markered JSON, then calls the
+# real updates_netshift_latest_tag / updates_check_netshift. No network.
+test_netshift_latest_tag() {
+    header "NetShift latest-tag jq parse (task-047)"
+
+    if ! command -v jq > /dev/null 2>&1; then
+        skip "jq not available"
+        return
+    fi
+
+    local updater="${NETSHIFT_LIB_DIR}/updater.sh"
+    if [ ! -r "$updater" ]; then
+        skip "updater.sh not found in ${NETSHIFT_LIB_DIR}"
+        return
+    fi
+
+    local work="/tmp/netshift-latesttag-$$"
+    rm -rf "$work"
+    mkdir -p "$work"
+
+    # Driver: source helpers.sh + updater.sh, silence logging, pin constants,
+    # stub the network boundary (updates_http_get_once) to emit $STUBLT_BODY,
+    # then run the REAL parse function named in $STUBLT_FN.
+    local drv="$work/driver.sh"
+    cat > "$drv" << 'DRVEOF'
+log() { :; }
+echolog() { :; }
+nolog() { :; }
+updates_log() { :; }
+. "DRV_HELPERS"
+. "DRV_UPDATER"
+NETSHIFT_RELEASE_API_URL="https://api.test/latest"
+NETSHIFT_VERSION="$STUBLT_INSTALLED"
+updates_http_get_once() { printf '%s' "$STUBLT_BODY"; }
+"$STUBLT_FN"
+DRVEOF
+    sed -i "s|DRV_UPDATER|$updater|g;s|DRV_HELPERS|${NETSHIFT_LIB_DIR}/helpers.sh|g" "$drv"
+
+    local out="$work/out.txt"
+    local rc_file="$work/rc.txt"
+    run_lt() {
+        # The parse function returns non-zero on the rate-limit/error case; under
+        # the harness `set -e` that would abort the suite, so capture rc via the
+        # `|| ...` guard (assertions read $out + $rc_file, not the live rc).
+        ash "$drv" > "$out" 2>/dev/null && printf '0' > "$rc_file" || printf '%s' "$?" > "$rc_file"
+    }
+
+    # The exact minified release object from the bug report: "url" BEFORE
+    # "tag_name", whole object on a single line, with .../releases/338202209.
+    local minified='{"url":"https://api.github.com/repos/yandexru45/netshift/releases/338202209","id":338202209,"tag_name":"0.8.8","name":"0.8.8"}'
+    # Pretty-printed equivalent (one key per line).
+    local pretty='{
+  "url": "https://api.github.com/repos/yandexru45/netshift/releases/338202209",
+  "id": 338202209,
+  "tag_name": "0.8.8",
+  "name": "0.8.8"
+}'
+    # Rate-limit/error object — no tag_name.
+    local ratelimit='{"message":"API rate limit exceeded for 1.2.3.4","documentation_url":"https://docs.github.com/rest"}'
+
+    export STUBLT_FN="updates_netshift_latest_tag"
+    export STUBLT_INSTALLED="0.8.8"
+
+    # ── Case 1 (REGRESSION GUARD): minified → exactly 0.8.8, NOT the url ──────
+    export STUBLT_BODY="$minified"
+    run_lt
+    if [ "$(cat "$out" 2>/dev/null)" = "0.8.8" ] && [ "$(cat "$rc_file" 2>/dev/null)" = "0" ]; then
+        pass "latesttag-minified-returns-tag-not-url:OK"
+    else
+        fail "latesttag-minified-returns-tag-not-url:FAIL" "got=[$(cat "$out" 2>/dev/null)] rc=$(cat "$rc_file" 2>/dev/null)"
+    fi
+
+    # ── Case 2: pretty-printed → 0.8.8 ───────────────────────────────────────
+    export STUBLT_BODY="$pretty"
+    run_lt
+    if [ "$(cat "$out" 2>/dev/null)" = "0.8.8" ] && [ "$(cat "$rc_file" 2>/dev/null)" = "0" ]; then
+        pass "latesttag-pretty-returns-tag:OK"
+    else
+        fail "latesttag-pretty-returns-tag:FAIL" "got=[$(cat "$out" 2>/dev/null)] rc=$(cat "$rc_file" 2>/dev/null)"
+    fi
+
+    # ── Case 3: rate-limit/error object (no tag_name) → empty + non-zero ─────
+    export STUBLT_BODY="$ratelimit"
+    run_lt
+    if [ -z "$(cat "$out" 2>/dev/null)" ] && [ "$(cat "$rc_file" 2>/dev/null)" != "0" ]; then
+        pass "latesttag-ratelimit-empty-nonzero:OK"
+    else
+        fail "latesttag-ratelimit-empty-nonzero:FAIL" "got=[$(cat "$out" 2>/dev/null)] rc=$(cat "$rc_file" 2>/dev/null)"
+    fi
+
+    # ── Case 4 (end-to-end): minified through updates_check_netshift with
+    # installed == tag → status "latest" (the false-outdated is gone). ────────
+    export STUBLT_FN="updates_check_netshift"
+    export STUBLT_BODY="$minified"
+    export STUBLT_INSTALLED="0.8.8"
+    run_lt
+    if jq -e '.success == true and .status == "latest"
+            and .latest_version == "0.8.8"' "$out" > /dev/null 2>&1; then
+        pass "latesttag-e2e-check-minified-latest:OK"
+    else
+        fail "latesttag-e2e-check-minified-latest:FAIL" "$(cat "$out" 2>/dev/null)"
+    fi
+
+    unset STUBLT_FN STUBLT_BODY STUBLT_INSTALLED
+    rm -rf "$work"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Test: NetShift self-update (task-017)
 # ─────────────────────────────────────────────────────────────────
 # Exercises updates_self_update_netshift (public wrapper + private core) through
@@ -5851,6 +5968,7 @@ main() {
             test_check_update_stable
             test_check_update_extended
             test_check_update_netshift
+            test_netshift_latest_tag
             test_self_update_netshift
             test_backup_integrity
             ;;
@@ -5875,6 +5993,7 @@ main() {
         stablecheck) test_check_update_stable ;;
         extcheck)    test_check_update_extended ;;
         netshiftcheck) test_check_update_netshift ;;
+        latesttag)   test_netshift_latest_tag ;;
         selfupdate)  test_self_update_netshift ;;
         backupguard) test_backup_integrity ;;
         jq)          test_jq_helpers ;;
@@ -5882,7 +6001,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck selfupdate backupguard"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck latesttag selfupdate backupguard"
             exit 1
             ;;
     esac

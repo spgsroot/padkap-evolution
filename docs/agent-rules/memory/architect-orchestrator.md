@@ -1229,3 +1229,50 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
 - CONDITION (M1) is commit-hygiene only: keep the pre-existing unrelated
   .opencode/agent/*.md churn (model rename + `bash "*": ask`->`allow`) OUT of the
   commit; the permission loosening is a separate human decision.
+
+## task-047 false-"Outdated" — minified-JSON tag parse (2026-06-12)
+
+- ISSUE (user, AX3000T, OWRT 25.12.2 apk, NetShift 0.8.8): "check for updates"
+  always says Outdated; "update" -> error; reinstall via Putty doesn't help. OCR
+  of the UI showed the "latest version" as a URL
+  `https://api.github.com/repos/yandexru45/netshift/releases/<id>` instead of a
+  version number.
+- ROOT CAUSE (PROVEN by reproduction): updates_netshift_latest_tag
+  (updater.sh) parsed the tag with `grep '"tag_name":' | head -n1 |
+  cut -d'"' -f4`. That ONLY works on PRETTY-PRINTED JSON. GitHub API/CDN/proxies
+  often return MINIFIED JSON (whole object on one line) -> grep matches the
+  entire line, `cut -d'"' -f4` returns the FIRST key's value = the release
+  "url". So latest="<url>", `0.8.8 != <url>` -> false "outdated"; and the
+  self-update worker (same fn for $latest) logged "downloading NetShift <url>
+  release packages" then failed. Reinstall is useless: bug is in PARSING.
+  Repro: `printf '{"url":".../releases/338202209","id":...,"tag_name":"0.8.8",...}'
+  | grep '"tag_name":'|head -1|cut -d'"' -f4` => the url.
+- WHY ONLY THIS FN: sing-box-extended path already uses jq (.tag_name); asset
+  download uses `grep -o "https://...\.(ipk|apk)"` (newline-agnostic, robust);
+  install.sh only rate-limit-greps + asset grep -o. All unaffected. jq is a hard
+  dep used 23x in updater.sh.
+- FIX (task-047, APPROVED W/ CONDITIONS): replace the body with
+  `tag="$(printf '%s' "$response" | jq -r '.tag_name // empty' 2>/dev/null)";
+  [ -n "$tag" ] || return 1; printf '%s' "$tag"`. Format-independent; `.tag_name
+  // empty` -> empty on rate-limit/error object (callers already handle
+  "could not determine latest"). Fixes BOTH check_update and self-update (shared
+  fn). Callers untouched. No Oniguruma.
+- TEST (smoke `latesttag`, registered main all)+case+usage): stub the network
+  boundary `updates_http_get_once` (NOT the fn under test), run the REAL
+  updates_netshift_latest_tag. Cases: MINIFIED (exact bug shape, url before
+  tag_name) -> 0.8.8 not url (regression guard); pretty -> 0.8.8; rate-limit ->
+  empty+nonzero; e2e minified through updates_check_netshift -> status latest.
+  set -e rc capture via `&& printf 0 || printf %s "$?"`. Guard self-proven.
+- LESSON (reusable): NEVER field-position-parse JSON (`grep KEY|head|cut -d'"'
+  -fN`) — it silently breaks on minified responses by grabbing the first key's
+  value. Use jq (already a dep) for any tag/scalar extraction; reserve `grep -o
+  <url-regex>` for URL-list extraction (that IS newline-agnostic and fine).
+- WHOLE-CHAIN verified on the user's class of box earlier: get_system_info keeps
+  latest="unknown" (no net); check_update is the on-demand fetch; the diagnostic
+  row + manager card flag outdated when installed != latest, so a bad latest
+  poisons BOTH UI spots — fixing the parse fixes all consumers.
+- CONDITION [S1] is commit-hygiene: keep the pre-existing unrelated
+  .opencode/agent/*.md churn (model rename + `bash "*": ask`->`allow`) OUT of the
+  commit; the bash-permission widening is security-relevant and needs a separate
+  explicit human decision. (Recurring across tasks 043/046/047 — these 5 files
+  were already dirty at session start.)

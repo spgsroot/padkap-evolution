@@ -11,7 +11,7 @@
 # Test names: all, deps, syntax, config, helpers, jq, cm, sb, nft,
 #             nftv6, selmark, isolation, monfd, unsupported, diagnostics, subscription, insecure, rejected,
 #             jobstate, selfheal, dnsdetour, globalproxy, stablecheck,
-#             extcheck, netshiftcheck, selfupdate, backupguard
+#             extcheck, netshiftcheck, latesttag, selfupdate, backupguard
 # ──────────────────────────────────────────────────────────────────
 
 services:

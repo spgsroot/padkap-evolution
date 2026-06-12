@@ -1626,17 +1626,23 @@ updates_self_update_netshift() {
     return "$rc"
 }
 
-# Echoes the GitHub latest-release tag for NetShift (e.g. "v0.8.1"), or nothing.
-# Reuses the same API endpoint as get_system_info / install.sh; parsed with
-# grep/cut (the tag is needed only as a display/compare string, no jq array).
+# Echoes the GitHub latest-release tag for NetShift (e.g. "0.8.8"), or nothing.
+# Reuses the same API endpoint as get_system_info / install.sh. Parsed with jq
+# (NOT grep/cut): GitHub may return the release object pretty-printed OR minified
+# (single line); a field-positional grep|cut grabs the first key's value (the
+# release "url") on minified JSON, which caused a false "outdated" + a self-update
+# that downloaded a garbage "version". jq is format-independent.
 updates_netshift_latest_tag() {
-    local response
+    local response tag
 
     response="$(updates_http_get_once "$NETSHIFT_RELEASE_API_URL" "")"
     if [ -z "$response" ]; then
         return 1
     fi
-    printf '%s' "$response" | grep '"tag_name":' | head -n1 | cut -d'"' -f4
+
+    tag="$(printf '%s' "$response" | jq -r '.tag_name // empty' 2>/dev/null)"
+    [ -n "$tag" ] || return 1
+    printf '%s' "$tag"
 }
 
 # Downloads the NetShift release assets matching the package-name prefixes for

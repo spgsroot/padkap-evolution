@@ -1460,3 +1460,30 @@ findings; keep under ~200 lines.
   all` 174 passed / 0 failed (aggregate counter folds the 5 new tokens into the
   test_subscription header group — count unchanged, the 5 fb-caseP/Q :OK lines
   print explicitly in the `subscription` run).
+
+## task-047 — latest-tag jq parse (false "Outdated" fix)
+
+- `updates_netshift_latest_tag` (`updater.sh:~1635`) used
+  `grep '"tag_name":' | head -n1 | cut -d'"' -f4`. That ONLY works on
+  pretty-printed JSON. On MINIFIED GitHub JSON (whole object on one line, `"url"`
+  before `"tag_name"`), grep matches the whole line and `cut -f4` returns the
+  FIRST key's value = the release `"url"` → false "outdated" + self-update
+  downloads a garbage "version". Fix: `jq -r '.tag_name // empty'`
+  (format-independent; `// empty` → empty on rate-limit/error objects; no
+  Oniguruma). jq is a hard dep (used 23× in updater.sh) and the sibling
+  sing-box-extended path already used `.tag_name`.
+- LESSON (whitespace-fragile grep|cut on JSON): never field-position-`cut` JSON
+  that may be minified. Prefer jq when it's already a dep.
+- New smoke test `test_netshift_latest_tag` (token `latesttag`): driver sources
+  updater.sh, stubs ONLY the network boundary `updates_http_get_once` (NOT the
+  parse fn), runs the REAL `updates_netshift_latest_tag`. 4 cases: minified→tag
+  (regression guard), pretty→tag, rate-limit→empty+nonzero, e2e via
+  `updates_check_netshift`→status "latest". Registered in main() all)+case+usage
+  +docker-compose.yml comment.
+- GOTCHA: under harness `set -e`, a stub-driver `ash "$drv"` that returns
+  non-zero (the rate-limit case) aborts the whole suite — guard rc capture with
+  `ash ... && printf 0 >rc || printf $? >rc`.
+- Guard self-proven: restoring the old grep|cut line made
+  `latesttag-minified-returns-tag-not-url` FAIL (returned the .../releases/<id>
+  url), then restored jq. Gates: shellcheck -S error clean (bin + libs +
+  install.sh); `smoke-tests all` 174→178 passed / 0 failed (+4 latesttag).
