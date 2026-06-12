@@ -1487,3 +1487,83 @@ findings; keep under ~200 lines.
   `latesttag-minified-returns-tag-not-url` FAIL (returned the .../releases/<id>
   url), then restored jq. Gates: shellcheck -S error clean (bin + libs +
   install.sh); `smoke-tests all` 174→178 passed / 0 failed (+4 latesttag).
+
+## task-048: scalar `option subscription_url` read-fallback + option->list migration
+
+- Root cause (PROVEN on hardware, Cudy WR3000E / OWRt 25.12.4 / NetShift 0.8.9):
+  a section storing `option subscription_url '<url>'` (legacy / CLI /
+  podkop-migrated configs) made `get_subscription_urls_for_section`
+  (`bin/netshift`) return EMPTY → `has_outbound_section` false → "Outbound
+  section not found. Aborted." → sing-box never starts → whole chain down (no nft
+  table, FakeIP 127.0.0.42:53 refused). `config_list_foreach` iterates ONLY UCI
+  `list` values; over a scalar `option` it iterates NOTHING. `config_get` reads
+  the scalar. Regression from task-022 (multi-URL feature made subscription_url a
+  list / form.DynamicList); the task-022 memory note "a lone legacy option reads
+  as a 1-element list — NO migration code" was the FALSE assumption that shipped
+  the bug. EVERY subscription-URL reader funnels through this one helper.
+- Fix 1 (load-bearing, single source): in `get_subscription_urls_for_section`,
+  AFTER the `config_list_foreach`, if `SUBSCRIPTION_URLS_COLLECTED` is still
+  empty, `config_get scalar_url "$section" "subscription_url"` and (if non-empty)
+  `_collect_subscription_url_handler "$scalar_url"` (reuse the handler so
+  dedup/format stays identical). All new vars `local`. Must stand alone on
+  read-only fs / when migration is skipped. Corrected the false comment at
+  `section_has_configured_outbound` (subscription branch) and the collector
+  header.
+- Fix 2 (hygiene, idempotent): `migrate_legacy_subscription_url_option` +
+  `_migrate_legacy_subscription_url_option_handler` (config_foreach callback).
+  Detects the broken shape robustly: LIST read empty AND scalar config_get
+  non-empty (an already-correct list is never touched). Rewrites via
+  `uci -q delete netshift.<sec>.subscription_url` then the `uci_add_list netshift
+  "$sec" subscription_url "$url"` SHELL HELPER (from /lib/functions.sh) — NOT the
+  `uci add_list "key=value"` CLI form, which splits on the first `=` and SILENTLY
+  LOSES query-string URLs (`?token=abc&x=1`) [code-review BLOCKER B1, reproduced
+  on hardware: CLI add_list rc=1, list empty, scalar already deleted => URL lost
+  on disk]. On add_list FAILURE the else branch `uci_set`s the scalar back so a
+  failed migration never leaves the section with NO url (and the flag stays 0 =>
+  no commit => uncommitted in-memory delete never persists; on-disk URL survives).
+  sets a module-level flag `SUBSCRIPTION_URL_OPTION_MIGRATED`; a SINGLE `uci commit netshift` +
+  `config_load "$NETSHIFT_CONFIG"` only if anything changed (mirrors the
+  :956/:1099 commit+reload). NEVER exits — uci failures log `warn` and continue
+  (the read-fallback covers correctness). Invoked ONCE at the TOP of `start_main`
+  BEFORE `check_requirements` (which reads URLs via has_outbound_section), AFTER
+  the file-scope `config_load`.
+- Smoke landmine confirmed (again): the multi-url `test_subscription` harness
+  STUBS `config_list_foreach` (feeds MU_URLS) and does NOT touch real UCI / does
+  NOT stub `config_get` — so it can NEVER catch this bug (it bypasses the broken
+  primitive). The regression guard MUST be a REAL-UCI test that `config_load`s a
+  fixture and runs the SHIPPED (awk-extracted) functions.
+- New top-level smoke test `test_sub_url_option` (alias `suburlopt`). 12 tokens:
+  `suburlopt:scalar-read` (regression guard — empty before fix),
+  `:scalar-hasoutbound`, `:list-read` (no-regression), `:migrate-flag`,
+  `:migrate-value`, `:migrate-islist`, `:migrate-idempotent`,
+  `:migrate-idempotent-value`, PLUS the `=`-URL [B1] guards
+  `:migrate-equrl-preserved`, `:migrate-equrl-islist`, `:migrate-equrl-single`
+  (asserts exactly 1 list element), `:migrate-idempotent-equrl` — fixture URL
+  `https://example.com/sub?token=abc&x=1`. The driver output is parsed in the
+  CURRENT shell (temp file + `while read < "$out"`, NO pipe) so the tokens
+  ACTUALLY GATE CI (fixed the harness-wide piped-while counter-quirk for this
+  test). Migration is tested against a throwaway
+  `/etc/config/netshift` (the function hardcodes the `netshift` config name) with
+  NETSHIFT_CONFIG=netshift; the caller backs up + restores any real one. Skips
+  cleanly if /lib/functions.sh or uci unavailable. Registered in all)+case alias+
+  "Available:" usage line + docker-compose.yml comment. Synthetic
+  `https://example.com/sub` ONLY (operator privacy rule: a user dump leaked a
+  real URL — never write a real subscription URL/host/id anywhere).
+- Self-prove DONE: removing the read-fallback block made `suburlopt:scalar-read`
+  go empty (its `:OK` disappeared) and `suburlopt:scalar-hasoutbound:FAIL`
+  appeared; restored and all tokens green again. Also self-proved [B1]: the old
+  `key=value` CLI add_list made `:migrate-equrl-preserved` FAIL (URL lost);
+  `uci_add_list` helper fixed it.
+- Whole-chain verified in-container: `has_outbound_section` returns TRUE for an
+  option-shaped config → requirements gate passes → config gen + sing-box check
+  proceed.
+- PRE-EXISTING (NOT mine): `test_rejected_hash` rh-case1/2/6 fail on the BASELINE
+  bin/netshift too (verified via git stash) — an existing container/env issue,
+  unrelated to task-048.
+- Gates: shellcheck -S error clean (bin + libs + install.sh); `smoke-tests all`
+  178→190 passed / 0 failed (the +12 is the 12 `suburlopt` tokens, which now
+  count because the test parses driver output in the CURRENT shell, NOT a pipe).
+  NO sacred constant/port/mark/path changed; UCI schema only normalizes an
+  existing key's representation (option→list, back-compat).
+- code-review round 2: APPROVED WITH CONDITIONS — [B1]/[S1]/[M1] all resolved;
+  the only condition was fixing THIS stale memory note (done).

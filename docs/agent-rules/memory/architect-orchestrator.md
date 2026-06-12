@@ -1276,3 +1276,52 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
   commit; the bash-permission widening is security-relevant and needs a separate
   explicit human decision. (Recurring across tasks 043/046/047 — these 5 files
   were already dirty at session start.)
+
+## task-048 scalar option subscription_url — sing-box won't start (2026-06-12)
+
+- ISSUE (Nick, Cudy WR3000E, OWRT 25.12.4, 0.8.9): urltest section works; switch
+  to subscription -> whole chain dead (sing-box not running, no nft table,
+  FakeIP 127.0.0.42:53 refused). Startup log: "Outbound section not found.
+  Aborted." despite config having a subscription_url.
+- DIAGNOSIS METHOD: user sent 2x3 diagnostic txt (global_check/show_sing_box_config/
+  view_logs) for working vs broken. The view_logs filenames were SWAPPED (the
+  tiny 435B file was the broken run, the big one was the working urltest run) —
+  read by CONTENT not filename. Broken view_logs: single "Outbound section not
+  found. Aborted." line. global_check(broken): proxy_config_type 'subscription'
+  with `option subscription_url '...'` (scalar, NOT list).
+- ROOT CAUSE (PROVEN on hardware): get_subscription_urls_for_section reads
+  subscription_url ONLY via config_list_foreach, which iterates ONLY UCI `list`
+  values and returns EMPTY for a scalar `option`. Proven: config_list_foreach
+  over option => []; config_get => the value; over list => works. The UI writes
+  `list` (form.DynamicList) so new configs are fine; legacy/CLI/podkop-migrated
+  configs use `option` and broke. Every subscription consumer funnels through
+  this ONE helper -> fixing it fixes the whole chain.
+- FIX (task-048, APPROVED round 2): (1) load-bearing read-fallback in
+  get_subscription_urls_for_section: if the list read is empty, config_get the
+  scalar and feed it through _collect_subscription_url_handler. (2) one-time
+  idempotent option->list migration at top of start_main (after config_load,
+  before check_requirements), only on the broken shape, never exits.
+- REVIEW LOOP (2 rounds, important): round 1 REQUIRES CHANGES — BLOCKER [B1]
+  data loss: the migration used `uci add_list "key=value"` which SPLITS ON THE
+  FIRST `=` and loses query-string URLs (?token=abc&x=1) — reproduced on hardware
+  (rc=1, list empty, scalar already deleted => URL gone on disk). Fix: use the
+  `uci_add_list <cfg> <sec> <opt> "<val>"` SHELL HELPER (separate-arg, preserves
+  =/&), delete-then-add with scalar RESTORE on add failure, flag gates the
+  commit. Plus [S1] the new test ran assertions on the RHS of a pipe (subshell
+  counter loss) so it didn't gate CI -> fixed to `while read < tmpfile`. Round 2
+  APPROVED.
+- LESSONS (reusable): (a) NEVER trust user-supplied filenames for which-is-which —
+  read by content. (b) `config_list_foreach` does NOT read scalar options; any
+  list-option reader needs a scalar config_get fallback for back-compat with
+  legacy/CLI/migrated configs. (c) `uci add_list "k=v"` CLI form is unsafe for
+  values containing `=` — use the uci_add_list shell helper. (d) a smoke test
+  that pipes into `while read; pass/fail` does NOT gate CI (subshell) — the count
+  jump (178->190) when fixed is the tell. (e) RE-check the dev's memory note on a
+  fix round — it's often pre-fix and re-seeds the anti-pattern.
+- PRIVACY: Nick's dump contained a real subscription URL; moved all 6 txt to
+  /tmp/opencode/nick-diag (out of git); code/tests/specs/memory use ONLY synthetic
+  https://example.com/sub. Final whole-tree sweep for the real host => clean.
+- GATES: shellcheck -S error clean; smoke `all` 178->190/0 (the +12 are the now-
+  gating suburlopt tokens incl. 4 =-URL guards); whole-chain verified (option
+  config -> has_outbound_section TRUE -> gen -> sing-box check). Runtime contract
+  intact (UCI schema = back-compat repr normalization only).

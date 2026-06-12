@@ -4837,6 +4837,187 @@ DDEOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: scalar `option subscription_url` read-fallback + option->list migration
+# (task-048)
+# ─────────────────────────────────────────────────────────────────
+# REAL-UCI regression guard for the hardware bug: a section storing
+# subscription_url as a scalar UCI `option` (legacy / CLI / podkop-migrated
+# configs) made get_subscription_urls_for_section return EMPTY (config_list_foreach
+# iterates ONLY list values), so has_outbound_section failed and sing-box never
+# started. This must use the SHIPPED functions against an actual config_load — NOT
+# the stubbed config_list_foreach in test_subscription (which honors MU_URLS
+# directly and therefore cannot catch the broken primitive). Synthetic URL only.
+test_sub_url_option() {
+    header "Scalar option subscription_url read-fallback + migration (task-048)"
+
+    local bin="${NETSHIFT_SRC}/usr/bin/netshift"
+    if [ ! -r "$bin" ]; then
+        skip "suburlopt — bin/netshift not found"
+        return
+    fi
+    if [ ! -r /lib/functions.sh ] || [ ! -r /lib/config/uci.sh ] || ! command -v uci > /dev/null 2>&1; then
+        skip "suburlopt — LuCI config_load / uci not available"
+        return
+    fi
+
+    local lib="${NETSHIFT_LIB_DIR}"
+    local drv="/tmp/netshift-suburlopt-$$.sh"
+    cat > "$drv" << 'SUBOPTEOF'
+BIN="BIN_PATH_PLACEHOLDER"
+LIB="LIB_DIR_PLACEHOLDER"
+. /lib/functions.sh
+. /lib/config/uci.sh 2>/dev/null || true
+# shellcheck disable=SC1090
+. "$LIB/constants.sh"
+# shellcheck disable=SC1090
+. "$LIB/helpers.sh"
+log() { :; }
+echolog() { :; }
+nolog() { :; }
+# Exercise the SHIPPED functions verbatim (awk-extracted) against a real
+# config_load — this is the whole point: the real LuCI config_list_foreach /
+# config_get primitives, not a stub.
+for fn in get_subscription_urls_for_section _collect_subscription_url_handler \
+          section_has_configured_outbound \
+          migrate_legacy_subscription_url_option \
+          _migrate_legacy_subscription_url_option_handler; do
+    eval "$(awk -v f="$fn" '$0 ~ "^"f"\\(\\) \\{"{p=1} p{print} p&&/^\}/{exit}' "$BIN")"
+done
+
+mkdir -p /etc/config
+
+# ── Fixture A: SCALAR option subscription_url (the exact broken shape) ──
+cat > /etc/config/netshift_suboptscalar <<'CFGEOF'
+config section 'main'
+    option connection_type 'proxy'
+    option proxy_config_type 'subscription'
+    option subscription_url 'https://example.com/sub'
+CFGEOF
+config_load netshift_suboptscalar
+urls="$(get_subscription_urls_for_section main)"
+[ "$urls" = "https://example.com/sub" ] && echo 'suburlopt:scalar-read:OK' || echo "suburlopt:scalar-read:FAIL [$urls]"
+if section_has_configured_outbound main; then
+    echo 'suburlopt:scalar-hasoutbound:OK'
+else
+    echo 'suburlopt:scalar-hasoutbound:FAIL'
+fi
+rm -f /etc/config/netshift_suboptscalar
+
+# ── Fixture B: LIST subscription_url (must still work — no regression) ──
+cat > /etc/config/netshift_suboptlist <<'CFGEOF'
+config section 'main'
+    option connection_type 'proxy'
+    option proxy_config_type 'subscription'
+    list subscription_url 'https://example.com/sub'
+CFGEOF
+config_load netshift_suboptlist
+urls="$(get_subscription_urls_for_section main)"
+[ "$urls" = "https://example.com/sub" ] && echo 'suburlopt:list-read:OK' || echo "suburlopt:list-read:FAIL [$urls]"
+rm -f /etc/config/netshift_suboptlist
+
+# ── Migration: option -> list, idempotent. The migration function hardcodes
+# the `netshift` config name, so write a throwaway /etc/config/netshift (the
+# caller backs up + restores any real one). Two sections: a plain URL AND a URL
+# with a query string containing `=`/`&`/`?` — the latter is the [B1] regression
+# guard: the old `uci add_list "key=value"` CLI form splits on the first `=` and
+# LOSES the value, while uci_add_list preserves it byte-for-byte. ──
+NETSHIFT_CONFIG="netshift"
+EQ_URL='https://example.com/sub?token=abc&x=1'
+cat > /etc/config/netshift <<CFGEOF
+config section 'main'
+    option connection_type 'proxy'
+    option proxy_config_type 'subscription'
+    option subscription_url 'https://example.com/sub'
+
+config section 'query'
+    option connection_type 'proxy'
+    option proxy_config_type 'subscription'
+    option subscription_url '$EQ_URL'
+CFGEOF
+config_load netshift
+
+# First run: must migrate both scalar options -> lists and flip the flag.
+migrate_legacy_subscription_url_option
+if [ "$SUBSCRIPTION_URL_OPTION_MIGRATED" = "1" ]; then
+    echo 'suburlopt:migrate-flag:OK'
+else
+    echo "suburlopt:migrate-flag:FAIL [$SUBSCRIPTION_URL_OPTION_MIGRATED]"
+fi
+# The stored values must be preserved.
+migrated_val="$(uci -q get netshift.main.subscription_url)"
+[ "$migrated_val" = "https://example.com/sub" ] && echo 'suburlopt:migrate-value:OK' || echo "suburlopt:migrate-value:FAIL [$migrated_val]"
+# [B1] regression guard: the `=`/`&` URL survives byte-for-byte.
+migrated_eq="$(uci -q get netshift.query.subscription_url)"
+[ "$migrated_eq" = "$EQ_URL" ] && echo 'suburlopt:migrate-equrl-preserved:OK' || echo "suburlopt:migrate-equrl-preserved:FAIL [$migrated_eq]"
+
+# After a fresh config_load the LIST path (config_list_foreach) returns each URL,
+# and the committed state must be a CLEAN single-element list (no leftover scalar
+# option and no duplicate element).
+config_load netshift
+SUBSCRIPTION_URLS_COLLECTED=""
+config_list_foreach main subscription_url _collect_subscription_url_handler
+[ "$SUBSCRIPTION_URLS_COLLECTED" = "https://example.com/sub" ] && echo 'suburlopt:migrate-islist:OK' || echo "suburlopt:migrate-islist:FAIL [$SUBSCRIPTION_URLS_COLLECTED]"
+SUBSCRIPTION_URLS_COLLECTED=""
+config_list_foreach query subscription_url _collect_subscription_url_handler
+[ "$SUBSCRIPTION_URLS_COLLECTED" = "$EQ_URL" ] && echo 'suburlopt:migrate-equrl-islist:OK' || echo "suburlopt:migrate-equrl-islist:FAIL [$SUBSCRIPTION_URLS_COLLECTED]"
+# Clean single element: `uci show` must render exactly one list value per section
+# (no leftover scalar option, no duplicate). uci renders a list element with the
+# index-bearing `[0]` syntax; assert exactly one line each.
+eq_lines="$(uci -q show netshift.query.subscription_url | grep -c "subscription_url")"
+[ "$eq_lines" = "1" ] && echo 'suburlopt:migrate-equrl-single:OK' || echo "suburlopt:migrate-equrl-single:FAIL [$eq_lines]"
+
+# Second run: idempotent no-op (already a list -> flag stays 0, no churn).
+migrate_legacy_subscription_url_option
+if [ "$SUBSCRIPTION_URL_OPTION_MIGRATED" = "0" ]; then
+    echo 'suburlopt:migrate-idempotent:OK'
+else
+    echo "suburlopt:migrate-idempotent:FAIL [$SUBSCRIPTION_URL_OPTION_MIGRATED]"
+fi
+idem_val="$(uci -q get netshift.main.subscription_url)"
+[ "$idem_val" = "https://example.com/sub" ] && echo 'suburlopt:migrate-idempotent-value:OK' || echo "suburlopt:migrate-idempotent-value:FAIL [$idem_val]"
+idem_eq="$(uci -q get netshift.query.subscription_url)"
+[ "$idem_eq" = "$EQ_URL" ] && echo 'suburlopt:migrate-idempotent-equrl:OK' || echo "suburlopt:migrate-idempotent-equrl:FAIL [$idem_eq]"
+
+rm -f /etc/config/netshift
+echo 'DONE'
+SUBOPTEOF
+    sed -i "s|LIB_DIR_PLACEHOLDER|$lib|g; s|BIN_PATH_PLACEHOLDER|$bin|g" "$drv"
+
+    # Protect any real /etc/config/netshift the container may carry: the
+    # migration path writes a throwaway one under that exact name.
+    local netshift_cfg_backup=""
+    if [ -f /etc/config/netshift ]; then
+        netshift_cfg_backup="/tmp/netshift-cfg-backup-$$"
+        cp /etc/config/netshift "$netshift_cfg_backup"
+    fi
+
+    # Parse in the CURRENT shell (temp file + `while read < "$out"`, NO pipe) so
+    # pass/fail update the global counters and a suburlopt:*:FAIL actually gates
+    # the suite (a pipe would run the while-body in a subshell — non-gating).
+    local sub_out="/tmp/netshift-suburlopt-out-$$"
+    sh "$drv" > "$sub_out" 2>/dev/null
+    # FAIL/SKIP tokens carry a trailing " [diagnostic]" suffix, so match with a
+    # trailing glob (*:FAIL*) — a bare "*:FAIL)" would miss them and silently
+    # drop the failure, defeating S1's gating.
+    while IFS= read -r line; do
+        case "$line" in
+            *:FAIL*) fail "$line" ;;
+            *:SKIP*) skip "$line" ;;
+            *:OK) pass "$line" ;;
+            DONE) ;;
+            *) ;;
+        esac
+    done < "$sub_out"
+    rm -f "$drv" "$sub_out"
+
+    if [ -n "$netshift_cfg_backup" ]; then
+        mv "$netshift_cfg_backup" /etc/config/netshift
+    else
+        rm -f /etc/config/netshift
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Test: global_proxy route rule semantics
 # ─────────────────────────────────────────────────────────────────
 test_global_proxy() {
@@ -5964,6 +6145,7 @@ main() {
             test_jobstate
             test_selfheal
             test_dns_via_outbound
+            test_sub_url_option
             test_global_proxy
             test_check_update_stable
             test_check_update_extended
@@ -5989,6 +6171,7 @@ main() {
         jobstate)    test_jobstate ;;
         selfheal)    test_selfheal ;;
         dnsdetour)   test_dns_via_outbound ;;
+        suburlopt)   test_sub_url_option ;;
         globalproxy) test_global_proxy ;;
         stablecheck) test_check_update_stable ;;
         extcheck)    test_check_update_extended ;;
@@ -6001,7 +6184,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription insecure rejected jobstate selfheal dnsdetour globalproxy stablecheck extcheck netshiftcheck latesttag selfupdate backupguard"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription insecure rejected jobstate selfheal dnsdetour suburlopt globalproxy stablecheck extcheck netshiftcheck latesttag selfupdate backupguard"
             exit 1
             ;;
     esac

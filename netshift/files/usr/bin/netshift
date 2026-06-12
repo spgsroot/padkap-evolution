@@ -117,9 +117,10 @@ section_has_configured_outbound() {
             [ -n "$outbound_json" ] && return 0
             ;;
         subscription)
-            # subscription_url is now a UCI list (a lone legacy option reads as a
-            # 1-element list). The section has a configured outbound if at least
-            # one URL is present.
+            # get_subscription_urls_for_section handles both the UCI `list` shape
+            # (new UI configs) and a scalar `option` shape (legacy / CLI /
+            # migrated configs), so the section has a configured outbound if it
+            # returns at least one URL.
             [ -n "$(get_subscription_urls_for_section "$section")" ] && return 0
             ;;
         esac
@@ -197,9 +198,10 @@ get_subscription_user_agent_cache_path() {
     echo "$SUBSCRIPTION_CACHE_FOLDER/${section}${urlhash:+.$urlhash}.user_agent"
 }
 
-# Collect a section's subscription_url entries (a UCI list, but a lone legacy
-# `option subscription_url` reads as a 1-element list exactly like
-# community_lists) into the newline-delimited global SUBSCRIPTION_URLS_COLLECTED.
+# Collect a section's subscription_url entries (a UCI list; a legacy / CLI /
+# migrated `option subscription_url` is a scalar that config_list_foreach does
+# NOT iterate — get_subscription_urls_for_section handles that shape with a
+# scalar fallback) into the newline-delimited global SUBSCRIPTION_URLS_COLLECTED.
 # URLs are opaque user text and may contain shell-special chars, so they are
 # accumulated newline-delimited (URLs cannot contain a newline) and consumers
 # read them with `while IFS= read -r`, never via word-splitting.
@@ -217,9 +219,23 @@ $url"
 
 get_subscription_urls_for_section() {
     local section="$1"
+    local scalar_url
 
     SUBSCRIPTION_URLS_COLLECTED=""
     config_list_foreach "$section" "subscription_url" _collect_subscription_url_handler
+
+    # Backward compat: legacy / CLI / podkop-migrated configs store
+    # subscription_url as a scalar `option` (not a `list`). config_list_foreach
+    # iterates ONLY list values, so it returns nothing for a scalar option. Fall
+    # back to a scalar read and treat it as a 1-element list. (PROVEN on hardware:
+    # config_list_foreach over an option => empty; config_get => the value.) This
+    # is the load-bearing fix and must stand alone even when the option->list
+    # migration is skipped (read-only fs / uci failure).
+    if [ -z "$SUBSCRIPTION_URLS_COLLECTED" ]; then
+        config_get scalar_url "$section" "subscription_url"
+        [ -n "$scalar_url" ] && _collect_subscription_url_handler "$scalar_url"
+    fi
+
     printf '%s' "$SUBSCRIPTION_URLS_COLLECTED"
 }
 
@@ -839,6 +855,12 @@ start_subscription_startup_retry_worker() {
 start_main() {
     log "Starting netshift"
 
+    # Normalize legacy scalar `option subscription_url` to the canonical `list`
+    # shape BEFORE check_requirements / config generation read the URLs. The
+    # read-fallback in get_subscription_urls_for_section already covers
+    # correctness; this is hygiene that converges stored configs to a list.
+    migrate_legacy_subscription_url_option
+
     check_requirements
 
     migration
@@ -1168,6 +1190,71 @@ restart() {
 # Migrations and validation funcs
 migration() {
     :
+}
+
+# config_foreach callback for migrate_legacy_subscription_url_option. For a
+# subscription section whose subscription_url is stored as a scalar `option`
+# (legacy / CLI / podkop-migrated configs) rather than a UCI `list`, rewrite it
+# in place as a `list` via uci. Detects the broken shape robustly: the LIST read
+# (config_list_foreach) yields nothing AND a scalar config_get is non-empty —
+# exactly the option-only shape, so an already-correct list is never touched.
+# Sets the module-level SUBSCRIPTION_URL_OPTION_MIGRATED flag when it changes
+# anything so the caller commits + reloads exactly once. Never exits: any uci
+# failure is logged at warn and skipped (the read-fallback in
+# get_subscription_urls_for_section covers correctness regardless).
+_migrate_legacy_subscription_url_option_handler() {
+    local section="$1"
+    local connection_type proxy_config_type scalar_url
+
+    config_get connection_type "$section" "connection_type"
+    [ "$connection_type" = "proxy" ] || return 0
+
+    config_get proxy_config_type "$section" "proxy_config_type" "url"
+    [ "$proxy_config_type" = "subscription" ] || return 0
+
+    # Only the broken shape: empty via the list path but present as a scalar.
+    SUBSCRIPTION_URLS_COLLECTED=""
+    config_list_foreach "$section" "subscription_url" _collect_subscription_url_handler
+    [ -z "$SUBSCRIPTION_URLS_COLLECTED" ] || return 0
+
+    config_get scalar_url "$section" "subscription_url"
+    [ -n "$scalar_url" ] || return 0
+
+    # Rewrite the scalar option as a list. Use the uci_add_list SHELL HELPER
+    # (from /lib/functions.sh), NOT the `uci add_list "key=value"` CLI form: the
+    # CLI form splits on the FIRST `=`, so a URL with a query string (very common,
+    # e.g. "...?token=abc&x=1") makes the CLI add_list fail and lose the value.
+    # The helper passes the value as a separate argument, preserving `=`/`&`
+    # byte-for-byte. Delete the scalar first so the result is a CLEAN single-
+    # element list (adding while the scalar option still exists would duplicate
+    # it into a 2-element list); if the add then fails, RESTORE the scalar option
+    # so a failed migration can never leave the section with NO url. Never exits.
+    uci -q delete "netshift.${section}.subscription_url" 2>/dev/null
+    if uci_add_list netshift "$section" subscription_url "$scalar_url" 2>/dev/null; then
+        SUBSCRIPTION_URL_OPTION_MIGRATED=1
+        log "Migrated legacy scalar subscription_url to list for section '$section'" "info"
+    else
+        uci_set netshift "$section" subscription_url "$scalar_url"
+        log "Failed to migrate scalar subscription_url to list for section '$section'; restored the original option and continuing (read fallback covers correctness)" "warn"
+    fi
+}
+
+# One-time, idempotent normalization of a legacy scalar `option subscription_url`
+# into the canonical `list subscription_url`. Runs once at startup AFTER
+# config_load and BEFORE config generation reads the URLs. Idempotent: a config
+# already using `list` is left untouched (no commit, no churn). Never exits.
+migrate_legacy_subscription_url_option() {
+    SUBSCRIPTION_URL_OPTION_MIGRATED=0
+
+    config_foreach _migrate_legacy_subscription_url_option_handler "section"
+
+    if [ "$SUBSCRIPTION_URL_OPTION_MIGRATED" -eq 1 ]; then
+        if uci commit "netshift" 2>/dev/null; then
+            config_load "$NETSHIFT_CONFIG"
+        else
+            log "Failed to commit subscription_url option->list migration; continuing (read fallback covers correctness)" "warn"
+        fi
+    fi
 }
 
 validate_service() {
