@@ -2046,6 +2046,124 @@ JQEOF
         fail "Country flag grouping wrong: got $grouped grouped, $ungrouped ungrouped"
     fi
 
+    # ── Universal grouper (task-044): prefix mode over synthetic tags ──────
+    # Mirror the shipped sing_box_build_subscription_groups extractor in an
+    # inline .jq so we exercise the exact mode-aware key logic without real
+    # node names. Synthetic tags only.
+    local grouper_filter_file="/tmp/netshift-grouper-filter-$$.jq"
+    cat > "$grouper_filter_file" << 'JQEOF'
+def is_regional_indicator: . >= 127462 and . <= 127487;
+def extract_country_flag:
+  (. | explode) as $codepoints
+  | if ($codepoints | length) >= 2
+      and ($codepoints[0] | is_regional_indicator)
+      and ($codepoints[1] | is_regional_indicator)
+    then ($codepoints[0:2] | implode)
+    else "" end;
+def extract_prefix($n):
+  (. | explode) as $codepoints
+  | if ($codepoints | length) == 0 then ""
+    else ($codepoints[0:$n] | implode) end;
+(try ($prefix_len | tonumber) catch $default_len) as $raw_len
+| (if ($raw_len | type) != "number" or $raw_len < 1
+    then $default_len else ($raw_len | floor) end) as $n
+| (if type == "array" then . else [] end) as $tags
+| reduce $tags[] as $tag (
+    {group_order: [], groups: {}, ungrouped: []};
+    (if $mode == "prefix" then ($tag | extract_prefix($n))
+     else ($tag | extract_country_flag) end) as $key
+    | if $key == "" then .ungrouped += [$tag]
+      else
+        .groups[$key] = ((.groups[$key] // []) + [$tag])
+        | if (.group_order | index($key)) == null
+            then .group_order += [$key] else . end
+      end
+  )
+JQEOF
+
+    # prefix-len 2 over synthetic tags: US(2), DE(1), short tag X keyed as X(1)
+    local prefix_synth prefix_result prefix_groups prefix_us prefix_de prefix_x prefix_ungrouped
+    prefix_synth='["US-01","US-02","DE-01","X"]'
+    prefix_result=$(echo "$prefix_synth" | jq -c \
+        --arg mode "prefix" --arg prefix_len "2" --argjson default_len 2 \
+        -f "$grouper_filter_file")
+    prefix_groups=$(echo "$prefix_result" | jq -r '.group_order | length')
+    prefix_us=$(echo "$prefix_result" | jq -r '.groups["US"] | length')
+    prefix_de=$(echo "$prefix_result" | jq -r '.groups["DE"] | length')
+    prefix_x=$(echo "$prefix_result" | jq -r '.groups["X"] | length')
+    prefix_ungrouped=$(echo "$prefix_result" | jq -r '.ungrouped | length')
+    if [ "$prefix_groups" -eq 3 ] && [ "$prefix_us" -eq 2 ] && \
+        [ "$prefix_de" -eq 1 ] && [ "$prefix_x" -eq 1 ] && [ "$prefix_ungrouped" -eq 0 ]; then
+        pass "Prefix grouping (len 2): US=$prefix_us DE=$prefix_de X=$prefix_x, groups=$prefix_groups, ungrouped=$prefix_ungrouped"
+    else
+        fail "Prefix grouping (len 2) wrong: US=$prefix_us DE=$prefix_de X=$prefix_x groups=$prefix_groups ungrouped=$prefix_ungrouped"
+    fi
+
+    # Consistency: prefix-len 2 over flag-only tags == country grouping. A
+    # flag is exactly 2 codepoints, so prefix-len-2 keys each flag tag by its
+    # leading flag — identical group keys to country mode (the non-flag
+    # "no-flag" element of country_test is excluded here, since under prefix
+    # mode it would group by its first 2 chars instead of going ungrouped).
+    local flag_only_test prefix_flag_result country_flag_result
+    local flag_only_file="/tmp/netshift-flagonly-$$.jq"
+    cat > "$flag_only_file" << 'JQEOF'
+def flag($l1; $l2): ([127462 + $l1, 127462 + $l2] | implode);
+[(flag(3; 4) + " Frankfurt"), (flag(20; 18) + " New York"), (flag(13; 11) + " Amsterdam"), (flag(9; 15) + " Tokyo")]
+JQEOF
+    flag_only_test=$(jq -cn -f "$flag_only_file")
+    rm -f "$flag_only_file"
+    prefix_flag_result=$(echo "$flag_only_test" | jq -c \
+        --arg mode "prefix" --arg prefix_len "2" --argjson default_len 2 \
+        -f "$grouper_filter_file")
+    country_flag_result=$(echo "$flag_only_test" | jq -c \
+        --arg mode "country" --arg prefix_len "2" --argjson default_len 2 \
+        -f "$grouper_filter_file")
+    if [ "$prefix_flag_result" = "$country_flag_result" ]; then
+        pass "Prefix grouping consistency vs country: identical grouping over flag tags"
+    else
+        fail "Prefix grouping consistency vs country wrong: prefix=$prefix_flag_result country=$country_flag_result"
+    fi
+
+    # Bad/empty len must NOT crash; falls back to default 2.
+    local prefix_badlen_result prefix_badlen_us prefix_emptylen_result prefix_emptylen_us
+    prefix_badlen_result=$(echo "$prefix_synth" | jq -c \
+        --arg mode "prefix" --arg prefix_len "abc" --argjson default_len 2 \
+        -f "$grouper_filter_file" 2>/dev/null)
+    prefix_badlen_us=$(echo "$prefix_badlen_result" | jq -r '.groups["US"] | length' 2>/dev/null)
+    prefix_emptylen_result=$(echo "$prefix_synth" | jq -c \
+        --arg mode "prefix" --arg prefix_len "" --argjson default_len 2 \
+        -f "$grouper_filter_file" 2>/dev/null)
+    prefix_emptylen_us=$(echo "$prefix_emptylen_result" | jq -r '.groups["US"] | length' 2>/dev/null)
+    if [ "$prefix_badlen_us" = "2" ] && [ "$prefix_emptylen_us" = "2" ]; then
+        pass "Prefix grouping bad/empty len falls back to 2 (no crash)"
+    else
+        fail "Prefix grouping len fallback wrong: bad-len US=$prefix_badlen_us empty-len US=$prefix_emptylen_us"
+    fi
+
+    # Space-containing prefix keys must group correctly (regression for the
+    # word-splitting bug: a `for k in $(...)` loop over group keys shatters a
+    # key like "A " (letter+space) — the current-shell `while read < file`
+    # loop in the subscription branch preserves it). Synthetic tags only.
+    local space_synth space_result space_groups space_a space_b space_ungrouped space_keys
+    space_synth='["A 1","A 2","B 9"]'
+    space_result=$(echo "$space_synth" | jq -c \
+        --arg mode "prefix" --arg prefix_len "2" --argjson default_len 2 \
+        -f "$grouper_filter_file")
+    rm -f "$grouper_filter_file"
+    space_groups=$(echo "$space_result" | jq -r '.group_order | length')
+    space_a=$(echo "$space_result" | jq -r '.groups["A "] | length')
+    space_b=$(echo "$space_result" | jq -r '.groups["B "] | length')
+    space_ungrouped=$(echo "$space_result" | jq -r '.ungrouped | length')
+    # The group_order keys must be exactly "A " and "B " (each ends with a
+    # space) — confirms the space is preserved, not split away.
+    space_keys=$(echo "$space_result" | jq -c '.group_order')
+    if [ "$space_groups" -eq 2 ] && [ "$space_a" = "2" ] && [ "$space_b" = "1" ] && \
+        [ "$space_ungrouped" -eq 0 ] && [ "$space_keys" = '["A ","B "]' ]; then
+        pass "Prefix grouping space-key: 'A '=$space_a 'B '=$space_b, groups=$space_groups, ungrouped=$space_ungrouped"
+    else
+        fail "Prefix grouping space-key wrong: 'A '=$space_a 'B '=$space_b groups=$space_groups ungrouped=$space_ungrouped keys=$space_keys"
+    fi
+
     # ── Fallback Subscription Normalizer (helpers.sh) ───────────────
     # Exercise normalize_subscription_to_singbox end-to-end against the
     # real libs. The facade hardcodes NETSHIFT_LIB=/usr/lib/netshift, so we

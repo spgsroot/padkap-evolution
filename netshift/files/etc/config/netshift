@@ -70,6 +70,12 @@ config section 'main'
 #        # is set (an explicit UA always wins).
 #        #option subscription_format_preference 'auto'
 #        option subscription_update_interval '1h'
+#        # Node grouping: off | country | prefix. 'country' clusters by leading
+#        # flag emoji; 'prefix' clusters by the first N codepoints of each node
+#        # name (N = subscription_group_prefix_len). subscription_group_mode
+#        # outranks the legacy subscription_group_by_countries boolean below.
+#        #option subscription_group_mode 'off'
+#        #option subscription_group_prefix_len '2'
 #        #option subscription_group_by_countries '0'
 #        #option urltest_check_interval '3m'
 #        #option urltest_tolerance '50'

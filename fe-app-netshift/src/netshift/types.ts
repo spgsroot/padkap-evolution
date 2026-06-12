@@ -120,7 +120,8 @@ export namespace NetShift {
     subscription_url: string[];
     subscription_format_preference?: 'auto' | 'xray' | 'singbox';
     subscription_update_interval?: string;
-    subscription_group_by_countries?: '0' | '1';
+    subscription_group_mode?: 'off' | 'country' | 'prefix';
+    subscription_group_prefix_len?: string;
     subscription_filter_include_keywords?: string[];
     subscription_filter_exclude_keywords?: string[];
   }

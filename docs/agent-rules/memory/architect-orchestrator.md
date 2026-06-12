@@ -1145,3 +1145,49 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
 - The CONDITION (M1) is commit-hygiene only: keep the pre-existing unrelated
   .opencode/agent/*.md churn (model rename + bash permission) OUT of the task-043
   commit — not a code issue. Those were already in the tree at session start.
+
+## task-044/045 Universal subscription grouper (2026-06-12)
+
+- FEATURE: generalize the country-flag subscription grouper into modes
+  off/country/prefix. Operator wanted "group by first N chars of the remark, N
+  configurable, default 2"; chose Variant A (single mode dropdown off/country/
+  prefix + length, count by Unicode CODEPOINTS), full backend+frontend.
+- ARCHITECTURE SEAM (reusable insight): the urltest-per-group + main-selector
+  tree builder in bin/netshift `subscription)` branch is mode-agnostic — only the
+  KEY EXTRACTOR + the on/off decision needed generalizing.
+  `sing_box_build_subscription_country_groups` -> `sing_box_build_subscription_
+  groups <tags_json> <mode> <prefix_len>` returning {group_order,groups,ungrouped}.
+  prefix key = `(.|explode)|.[0:$n]|implode` (codepoint slice, Unicode-safe, no
+  Oniguruma). country path kept byte-identical (regional-indicator gate). N=2
+  over a flag tag == the flag, so country is a consistent special case.
+- LANDMINE CAUGHT IN REVIEW LOOP (architect spotted, not the dev): the inherited
+  group loop `for k in $(jq -r '.group_order[]')` WORD-SPLITS on IFS. Safe for
+  country flags (no spaces) but BREAKS prefix mode whose keys can contain spaces
+  (e.g. tag "A 1" prefix-2 -> key "A "). Fix: mktemp + `while IFS= read -r k ...
+  done < "$tmp"` in the CURRENT shell (NOT `cmd | while read` — that subshell
+  would lose the `config=`/`selector_outbounds_json=` mutations; same landmine
+  class as the smoke `cmd|while read` trap). Mirror the existing
+  `subscription_urls_tmp` mktemp+read<file pattern already in that branch. mktemp
+  failure must fatal+exit 1. ALWAYS audit reused loops when the key domain widens.
+- prefix_len hardening: jq side `try tonumber catch default | <1 -> default |
+  floor`; shell side `case '' | *[!0-9]* -> default ;; *) [ x -ge 1 ] 2>/dev/null`.
+  short tag (<N) keys by whole self (NOT ungrouped); empty tag -> ungrouped.
+- LEGACY MIGRATION done BACKEND-side (no JS migration): subscription_group_mode
+  present OUTRANKS legacy; absent -> read subscription_group_by_countries (then
+  alias group_by_countries) truthy->country else off. Frontend just writes the
+  new options. New constant SUBSCRIPTION_GROUP_DEFAULT_PREFIX_LEN=2.
+- FRONTEND: form.Flag -> form.ListValue subscription_group_mode (off/country/
+  prefix) + form.Value subscription_group_prefix_len (datatype and(uinteger,
+  min(1)), depends subscription_group_mode:"prefix"); both taboption() in the
+  `subscription` tab (tabbed-CBI completeness). types.ts old key removed (no TS
+  reader). 7 i18n msgids + RU, fe<->luci byte-identical. main.js NO diff
+  (type-only change + hand-written view) — so the rendered tab needs a HUMAN
+  visual check (carried as APPROVED-WITH-CONDITIONS [M1]).
+- GATES: shellcheck error clean; smoke 170->174/0 (country regression kept +
+  prefix len-2/consistency/bad-len/space-key); whole-chain sing-box check PASS
+  for mode=prefix; yarn ci green (472 vitest), main.js no-diff. Both APPROVED
+  (045 with the human-eyeball condition). PRIVACY: synthetic tags only, full
+  diff privacy-scan clean. Subagents truncated their final messages TWICE this
+  session (frontend stopped before section.js; reviewer stopped mid-analysis) —
+  ALWAYS verify on-disk state + run/inspect gates yourself rather than trusting
+  a truncated "done".

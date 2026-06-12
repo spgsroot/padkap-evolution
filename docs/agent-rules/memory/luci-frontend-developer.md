@@ -811,3 +811,53 @@ append findings; keep under ~200 lines.
   task-039 backend changes (netshift bin, updater.sh, tests/entrypoint.sh) +
   .opencode/agent edits — NOT mine. FLAG (no browser): button render + toast
   sequence verified by reasoning + the gate, NOT screenshotted.
+
+## task-045 — universal subscription grouper (mode dropdown + prefix length)
+
+- REPLACED the single `subscription_group_by_countries` form.Flag (section.js
+  ~190-201) with TWO taboptions in the SAME `subscription` tab (mandatory —
+  tabbed section, a plain option() renders nothing):
+  (1) `form.ListValue subscription_group_mode` — values off/country/prefix
+  (`_("Off")`/`_("By country flag")`/`_("By name prefix")`), `o.default="off"`,
+  `o.rmempty=false`, depends `{connection_type:"proxy",proxy_config_type:
+  "subscription"}`; title `_("Subscription grouping")` + single-literal help.
+  (2) `form.Value subscription_group_prefix_len` — title `_("Prefix length")`,
+  `o.default="2"`, `o.datatype="and(uinteger,min(1))"`, `o.rmempty=false`,
+  depends ADDS `subscription_group_mode:"prefix"` (3-key object) so it shows
+  ONLY when mode=prefix. CBI cross-field depends within the same section/tab
+  works fine; a fully-hidden field is OK.
+- CROSS-LAYER CONTRACT (task-044 backend, DONE): UCI options EXACTLY
+  `subscription_group_mode` ∈ {off,country,prefix} default off, and
+  `subscription_group_prefix_len` positive-int string default 2 (meaningful
+  only when mode=prefix). Backend falls back to the LEGACY
+  `subscription_group_by_countries` boolean ONLY when the new option is ABSENT
+  → the UI writes only the NEW options; NO JS migration written.
+- types.ts: swapped `subscription_group_by_countries?: '0'|'1'` →
+  `subscription_group_mode?: 'off'|'country'|'prefix'` +
+  `subscription_group_prefix_len?: string`. Grepped src first — NOTHING in TS
+  reads the old key (only the type decl), so removing it is safe (backend reads
+  the legacy UCI key directly, not via UI). Pure type-only → erased at build.
+- main.js: ZERO diff (section.js hand-written + not bundled; types.ts type-only).
+  md5 unchanged across the build (aa89dfc5…). Confirmed via
+  `git diff --exit-code main.js`. This is the EXPECTED/correct outcome — a diff
+  there would mean an unexpected src change.
+- i18n: ran `node {extract-calls,generate-pot,generate-po ru,distribute-
+  locales}.js` (yarn classic 1.22.22, but used node to avoid corepack). msgid
+  delta = clean SWAP: removed 2 (`Group by countries` + its long description),
+  added 7 (Off / By country flag / By name prefix / Subscription grouping /
+  Prefix length / the grouping description / the prefix-length description).
+  Filled 7 RU msgstr in SOURCE locales/netshift.ru.po then re-ran distribute →
+  po/ru + po/templates byte-identical to source (diff -q both pairs). 0 empty
+  non-header msgstr after. RU: Off→Выключено, By country flag→По флагу страны,
+  By name prefix→По префиксу имени, Subscription grouping→Группировка подписки,
+  Prefix length→Длина префикса.
+- yarn ci GREEN: format no-diff, eslint --max-warnings=0, vitest 472 pass, tsup
+  build. yarn.lock unchanged, no .yarn/.yarnrc.yml. No new vitest (no new pure
+  TS logic — datatype validation is LuCI client-side).
+- PRIVACY: no subscription-identifying data (hosts/IPs/URLs/keys/node names) in
+  any code/comment/i18n/test/memory — generic "proxy name"/"country flag"
+  wording only.
+- FLAG (no browser in env): the rendered Subscription tab (dropdown +
+  conditional prefix-length field appearing only on mode=prefix, taboption
+  auto-hide) needs a HUMAN VISUAL CHECK before merge — verified structurally
+  only (taboption completeness, depends preserved).

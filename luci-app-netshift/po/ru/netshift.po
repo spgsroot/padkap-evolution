@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: NETSHIFT\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-11 20:31+0300\n"
-"PO-Revision-Date: 2026-06-11 20:31+0300\n"
+"POT-Creation-Date: 2026-06-12 08:52+0300\n"
+"PO-Revision-Date: 2026-06-12 08:52+0300\n"
 "Last-Translator: yandexru45\n"
 "Language-Team: none\n"
 "Language: ru\n"
@@ -85,6 +85,12 @@ msgstr "Браузер не использует FakeIP"
 
 msgid "Browser is using FakeIP correctly"
 msgstr "Браузер использует FakeIP"
+
+msgid "By country flag"
+msgstr "По флагу страны"
+
+msgid "By name prefix"
+msgstr "По префиксу имени"
 
 msgid "Cache File Path"
 msgstr "Путь к файлу кэша"
@@ -368,11 +374,8 @@ msgstr "Глобальная проверка"
 msgid "Global Proxy"
 msgstr "Глобальный прокси"
 
-msgid "Group by countries"
-msgstr "Группировать по странам"
-
-msgid "Group subscription proxies into separate URLTest groups by the country flag at the start of each tag"
-msgstr "Группирует прокси подписки по флагу страны в начале тега в отдельные URLTest-группы"
+msgid "Group subscription proxies into URLTest groups. 'By country flag' uses the flag emoji at the start of each name; 'By name prefix' groups by the first N characters."
+msgstr "Группировать прокси из подписки в группы URLTest. «По флагу страны» использует эмодзи флага в начале каждого имени; «По префиксу имени» группирует по первым N символам."
 
 msgid "How often to automatically update the subscription"
 msgstr "Как часто автоматически обновлять подписку"
@@ -641,6 +644,12 @@ msgstr "Не отвечает"
 msgid "Not running"
 msgstr "Не запущено"
 
+msgid "Number of leading characters of each proxy name to group by."
+msgstr "Количество начальных символов имени каждого прокси для группировки."
+
+msgid "Off"
+msgstr "Выключено"
+
 msgid "Only one section can be global at a time."
 msgstr "Только одна секция может быть глобальной одновременно."
 
@@ -673,6 +682,9 @@ msgstr "Путь должен заканчиваться на cache.db"
 
 msgid "Pending"
 msgstr "Ожидает запуска"
+
+msgid "Prefix length"
+msgstr "Длина префикса"
 
 msgid "Protocol toggles, file paths and logging. Block DoH only after switching upstream DNS to UDP or DoT."
 msgstr "Переключатели протоколов, пути к файлам и журналирование. Включайте блокировку DoH только после переключения вышестоящего DNS на UDP или DoT."
@@ -871,6 +883,9 @@ msgstr "Источники подписок, фильтры серверов и 
 
 msgid "Subscription format"
 msgstr "Формат подписки"
+
+msgid "Subscription grouping"
+msgstr "Группировка подписки"
 
 msgid "Subscription Update Interval"
 msgstr "Интервал обновления подписки"

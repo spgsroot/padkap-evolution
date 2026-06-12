@@ -189,16 +189,35 @@ function createSectionContent(section) {
 
   o = section.taboption(
     "subscription",
-    form.Flag,
-    "subscription_group_by_countries",
-    _("Group by countries"),
+    form.ListValue,
+    "subscription_group_mode",
+    _("Subscription grouping"),
     _(
-      "Group subscription proxies into separate URLTest groups by the country flag at the start of each tag",
+      "Group subscription proxies into URLTest groups. 'By country flag' uses the flag emoji at the start of each name; 'By name prefix' groups by the first N characters.",
     ),
   );
-  o.default = "0";
+  o.value("off", _("Off"));
+  o.value("country", _("By country flag"));
+  o.value("prefix", _("By name prefix"));
+  o.default = "off";
   o.rmempty = false;
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
+
+  o = section.taboption(
+    "subscription",
+    form.Value,
+    "subscription_group_prefix_len",
+    _("Prefix length"),
+    _("Number of leading characters of each proxy name to group by."),
+  );
+  o.default = "2";
+  o.datatype = "and(uinteger,min(1))";
+  o.rmempty = false;
+  o.depends({
+    connection_type: "proxy",
+    proxy_config_type: "subscription",
+    subscription_group_mode: "prefix",
+  });
 
   o = section.taboption(
     "subscription",

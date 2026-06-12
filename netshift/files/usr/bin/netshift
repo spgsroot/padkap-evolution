@@ -2141,10 +2141,25 @@ sing_box_get_unique_outbound_tag() {
     echo "$candidate"
 }
 
-sing_box_build_subscription_country_groups() {
+# Mode-aware subscription group-key builder (task-044). Generalizes the former
+# country-only grouper into off/country/prefix modes. Returns the shape
+# {group_order: [...], groups: {key: [tags]}, ungrouped: [...]}.
+#   - mode=country: byte-identical to the legacy flag extractor (regional-
+#     indicator gate; non-flag tags -> ungrouped).
+#   - mode=prefix: group key = first N codepoints of the tag (N = $3). A tag
+#     shorter than N codepoints keys by its WHOLE tag (still groups with
+#     identical short tags); an empty tag -> ungrouped. $3 is coerced via
+#     tonumber, floored to 1; bad/0/empty -> default 2.
+# No Oniguruma jq (explode/implode/slice/index/reduce only).
+sing_box_build_subscription_groups() {
     local subscription_outbound_tags_json="$1"
+    local mode="$2"
+    local prefix_len="$3"
 
-    printf '%s' "$subscription_outbound_tags_json" | jq -c '
+    printf '%s' "$subscription_outbound_tags_json" | jq -c \
+        --arg mode "$mode" \
+        --arg prefix_len "$prefix_len" \
+        --argjson default_len "$SUBSCRIPTION_GROUP_DEFAULT_PREFIX_LEN" '
         def is_regional_indicator: . >= 127462 and . <= 127487;
         def extract_country_flag:
             (. | explode) as $codepoints
@@ -2154,17 +2169,33 @@ sing_box_build_subscription_country_groups() {
               then ($codepoints[0:2] | implode)
               else ""
               end;
+        # extract_prefix($n): group key = first $n codepoints, or "" (ungrouped)
+        # for an empty tag. A short tag keys by its whole self.
+        def extract_prefix($n):
+            (. | explode) as $codepoints
+            | if ($codepoints | length) == 0
+              then ""
+              else ($codepoints[0:$n] | implode)
+              end;
 
-        (if type == "array" then . else [] end) as $tags
+        # Effective prefix length: coerce, floor to 1, fall back to default.
+        (try ($prefix_len | tonumber) catch $default_len) as $raw_len
+        | (if ($raw_len | type) != "number" or $raw_len < 1
+            then $default_len
+            else ($raw_len | floor)
+            end) as $n
+
+        | (if type == "array" then . else [] end) as $tags
         | reduce $tags[] as $tag (
-            {country_order: [], country_groups: {}, ungrouped: []};
-            ($tag | extract_country_flag) as $country_flag
-            | if $country_flag == "" then
+            {group_order: [], groups: {}, ungrouped: []};
+            (if $mode == "prefix" then ($tag | extract_prefix($n))
+             else ($tag | extract_country_flag) end) as $key
+            | if $key == "" then
                 .ungrouped += [$tag]
               else
-                .country_groups[$country_flag] = ((.country_groups[$country_flag] // []) + [$tag])
-                | if (.country_order | index($country_flag)) == null then
-                    .country_order += [$country_flag]
+                .groups[$key] = ((.groups[$key] // []) + [$tag])
+                | if (.group_order | index($key)) == null then
+                    .group_order += [$key]
                   else
                     .
                   end
@@ -2330,7 +2361,7 @@ configure_outbound_handler() {
             log "Detected proxy configuration type: subscription" "debug"
             local subscription_urls_tmp subscription_url subscription_url_count urltest_tag selector_tag \
                 urltest_outbounds selector_outbounds urltest_check_interval urltest_tolerance \
-                urltest_testing_url subscription_group_by_countries subscription_group_by_countries_raw \
+                urltest_testing_url group_mode group_mode_raw prefix_len prefix_len_raw legacy_group_raw \
                 subscription_outbound_tags_json service_proxy_address subscription_ready \
                 subscription_filter_include_keywords_json subscription_filter_exclude_keywords_json \
                 subscription_keyword_filter_active urlhash subscription_json_path subscription_url_cache_path \
@@ -2340,19 +2371,54 @@ configure_outbound_handler() {
             config_get urltest_check_interval "$section" "urltest_check_interval" "3m"
             config_get urltest_tolerance "$section" "urltest_tolerance" 50
             config_get urltest_testing_url "$section" "urltest_testing_url" "https://www.gstatic.com/generate_204"
-            config_get subscription_group_by_countries_raw "$section" "subscription_group_by_countries" ""
-            if [ -z "$subscription_group_by_countries_raw" ]; then
-                # Backward-compatible alias in case custom builds used another key
-                config_get subscription_group_by_countries_raw "$section" "group_by_countries" ""
-            fi
+            # Grouping mode (task-044): off | country | prefix. The new
+            # subscription_group_mode option OUTRANKS the legacy boolean. When
+            # the new option is absent we fall back to the legacy boolean
+            # subscription_group_by_countries (and its older alias
+            # group_by_countries): truthy => country, else off.
+            config_get group_mode_raw "$section" "subscription_group_mode" ""
+            config_get prefix_len_raw "$section" "subscription_group_prefix_len" "$SUBSCRIPTION_GROUP_DEFAULT_PREFIX_LEN"
 
-            if is_truthy_option "$subscription_group_by_countries_raw"; then
-                subscription_group_by_countries=1
+            if [ -z "$group_mode_raw" ]; then
+                config_get legacy_group_raw "$section" "subscription_group_by_countries" ""
+                if [ -z "$legacy_group_raw" ]; then
+                    config_get legacy_group_raw "$section" "group_by_countries" ""
+                fi
+                if is_truthy_option "$legacy_group_raw"; then
+                    group_mode="country"
+                else
+                    group_mode="off"
+                fi
             else
-                subscription_group_by_countries=0
+                case "$group_mode_raw" in
+                off | country | prefix)
+                    group_mode="$group_mode_raw"
+                    ;;
+                *)
+                    group_mode="off"
+                    ;;
+                esac
             fi
 
-            log "Subscription country grouping for section '$section': raw='${subscription_group_by_countries_raw:-<empty>}', enabled=$subscription_group_by_countries" "debug"
+            # Sanitize the prefix length: positive integer only, else default.
+            case "$prefix_len_raw" in
+            '' | *[!0-9]*)
+                prefix_len="$SUBSCRIPTION_GROUP_DEFAULT_PREFIX_LEN"
+                ;;
+            *)
+                if [ "$prefix_len_raw" -ge 1 ] 2>/dev/null; then
+                    prefix_len="$prefix_len_raw"
+                else
+                    prefix_len="$SUBSCRIPTION_GROUP_DEFAULT_PREFIX_LEN"
+                fi
+                ;;
+            esac
+
+            if [ "$group_mode" = "prefix" ]; then
+                log "Subscription grouping for section '$section': mode=$group_mode, prefix_len=$prefix_len" "debug"
+            else
+                log "Subscription grouping for section '$section': mode=$group_mode" "debug"
+            fi
 
             # Keyword whitelist/blacklist filtering of subscription nodes by
             # display name. Both are optional UCI lists of opaque match strings.
@@ -2519,36 +2585,50 @@ configure_outbound_handler() {
                     subscription_outbound_tags_json="$(comma_string_to_json_array "$SUBSCRIPTION_OUTBOUND_TAGS")"
                 fi
 
-                if [ "$subscription_group_by_countries" -eq 1 ]; then
-                    local grouping_json country_flag country_group_outbounds country_group_tag \
+                if [ "$group_mode" != "off" ]; then
+                    local grouping_json group_key group_outbounds group_tag group_keys_tmp \
                         selector_outbounds_json selector_default ungrouped_outbounds_json grouped_count ungrouped_count
 
-                    grouping_json="$(sing_box_build_subscription_country_groups "$subscription_outbound_tags_json")"
+                    grouping_json="$(sing_box_build_subscription_groups "$subscription_outbound_tags_json" "$group_mode" "$prefix_len")"
                     if [ -z "$grouping_json" ]; then
                         log "Failed to build grouped subscription outbounds for section '$section'. Aborted." "fatal"
                         exit 1
                     fi
 
-                    grouped_count="$(echo "$grouping_json" | jq -r '.country_order | length' 2>/dev/null)"
+                    grouped_count="$(echo "$grouping_json" | jq -r '.group_order | length' 2>/dev/null)"
                     ungrouped_count="$(echo "$grouping_json" | jq -r '.ungrouped | length' 2>/dev/null)"
-                    log "Country grouping prepared for section '$section': groups=$grouped_count, ungrouped=$ungrouped_count" "debug"
+                    log "Subscription grouping prepared for section '$section' (mode=$group_mode): groups=$grouped_count, ungrouped=$ungrouped_count" "debug"
 
                     selector_outbounds_json="[]"
 
-                    for country_flag in $(echo "$grouping_json" | jq -r '.country_order[]' 2>/dev/null); do
-                        country_group_outbounds="$(echo "$grouping_json" | jq -c --arg country_flag "$country_flag" '.country_groups[$country_flag] // []' 2>/dev/null)"
-                        if [ -z "$country_group_outbounds" ] || [ "$country_group_outbounds" = "[]" ]; then
+                    # Iterate group keys WITHOUT word-splitting: prefix-mode keys
+                    # can legitimately contain spaces (e.g. a "letter+space"
+                    # prefix), which a `for k in $(...)` loop would shatter. Use
+                    # the same mktemp + `while read < file` pattern as the URL
+                    # loop above so the body runs in the CURRENT shell and its
+                    # mutations to $config / $selector_outbounds_json survive
+                    # (a `... | while read` body would run in a subshell and lose
+                    # them). One key per line; group keys never contain newlines.
+                    group_keys_tmp="$(mktemp "${TMPDIR:-/tmp}/netshift-cfg-groupkeys.XXXXXX")" || {
+                        log "Failed to enumerate subscription group keys for section '$section'. Aborted." "fatal"
+                        exit 1
+                    }
+                    echo "$grouping_json" | jq -r '.group_order[]' 2>/dev/null > "$group_keys_tmp"
+                    while IFS= read -r group_key || [ -n "$group_key" ]; do
+                        group_outbounds="$(echo "$grouping_json" | jq -c --arg group_key "$group_key" '.groups[$group_key] // []' 2>/dev/null)"
+                        if [ -z "$group_outbounds" ] || [ "$group_outbounds" = "[]" ]; then
                             continue
                         fi
 
-                        country_group_tag="$(sing_box_get_unique_outbound_tag "$config" "$country_flag Fastest")"
-                        config="$(sing_box_cm_add_urltest_outbound "$config" "$country_group_tag" "$country_group_outbounds" \
+                        group_tag="$(sing_box_get_unique_outbound_tag "$config" "$group_key Fastest")"
+                        config="$(sing_box_cm_add_urltest_outbound "$config" "$group_tag" "$group_outbounds" \
                             "$urltest_testing_url" "$urltest_check_interval" "$urltest_tolerance")"
 
                         selector_outbounds_json=$(
-                            printf '%s' "$selector_outbounds_json" | jq -ac --arg tag "$country_group_tag" '. + [$tag]' 2>/dev/null
+                            printf '%s' "$selector_outbounds_json" | jq -ac --arg tag "$group_tag" '. + [$tag]' 2>/dev/null
                         )
-                    done
+                    done < "$group_keys_tmp"
+                    rm -f "$group_keys_tmp"
 
                     if [ -z "$selector_outbounds_json" ]; then
                         selector_outbounds_json="[]"

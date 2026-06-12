@@ -127,6 +127,9 @@ SB_SERVICE_MIXED_INBOUND_ADDRESS="127.0.0.1"
 SB_SERVICE_MIXED_INBOUND_PORT=4534
 # Outbounds
 SB_DIRECT_OUTBOUND_TAG="direct-out"
+# Subscription grouping (task-044). Default codepoint count for prefix-mode
+# grouping when subscription_group_prefix_len is unset/invalid.
+SUBSCRIPTION_GROUP_DEFAULT_PREFIX_LEN=2
 # Route
 SB_REJECT_RULE_TAG="reject-rule-tag"
 SB_EXCLUSION_RULE_TAG="exclusion-rule-tag"
