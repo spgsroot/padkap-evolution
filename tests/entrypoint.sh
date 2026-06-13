@@ -1273,6 +1273,201 @@ USEOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: Text-list Selector / URLTest (task-051)
+#
+# Drives the SHIPPED configure_outbound_handler (awk-extracted verbatim) for the
+# NEW selector_text / urltest_text branches with a table-driven config_get stub,
+# the REAL facade/manager/helpers, and a real `sing-box check`. The textarea
+# value is a multi-line blob: two synthetic vless:// + one ss:// + a blank line +
+# one unsupported tuic://, plus a CRLF-suffixed line to prove trailing-\r
+# tolerance. All values are synthetic placeholders (nothing private).
+#
+# IMPORTANT (gating): the driver writes name:OK/FAIL/SKIP tokens to a RESULT FILE
+# and the assertions are consumed in the CURRENT shell via `while read < file`
+# (NOT `cmd | while read`), so pass/fail mutate the real PASS/FAIL counters and
+# this test actually GATES the suite.
+test_text_list_outbound() {
+    header "Text-list Selector / URLTest (task-051)"
+
+    if ! command -v sing-box > /dev/null 2>&1; then
+        skip "sing-box not installed"
+        return
+    fi
+
+    local lib="${NETSHIFT_LIB_DIR}"
+    local bin="${NETSHIFT_SRC}/usr/bin/netshift"
+    local facade_lib="$lib/sing_box_config_facade.sh"
+    if [ ! -r "$facade_lib" ] || [ ! -r "$bin" ]; then
+        fail "facade lib / bin not found"
+        return
+    fi
+
+    # The facade hardcodes NETSHIFT_LIB="/usr/lib/netshift" for its own sourcing
+    # of helpers + manager; bind the bind-mounted sources to that path.
+    mkdir -p /usr/lib/netshift
+    ln -sf "$lib/helpers.sh" /usr/lib/netshift/helpers.sh
+    ln -sf "$lib/sing_box_config_manager.sh" /usr/lib/netshift/sing_box_config_manager.sh
+
+    local drv="/tmp/test-text-list-$$.sh"
+    local out="/tmp/test-text-list-out-$$.txt"
+    cat > "$drv" << 'TLEOF'
+. "CONST_LIB"
+. "FACADE_LIB"
+
+WARN_LOG="/tmp/tl-warn-$$.log"
+: > "$WARN_LOG"
+log()     { printf '%s|%s\n' "${2:-info}" "$1" >> "$WARN_LOG"; }
+echolog() { printf '%s|%s\n' "${2:-info}" "$1" >> "$WARN_LOG"; }
+nolog()   { :; }
+
+is_sing_box_extended() { return 0; }
+
+# awk-extract the SHIPPED helper + handler + unavailable marker verbatim.
+eval "$(awk '/^_build_proxy_member_outbounds\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+eval "$(awk '/^configure_outbound_handler\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+eval "$(awk '/^mark_section_outbound_unavailable\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+
+_tl_key() { printf 'TL_%s_%s' "$(printf '%s' "$1" | tr '.-' '__')" "$2"; }
+config_get() {
+    local _k _v
+    _k="$(_tl_key "$2" "$3")"
+    eval "_v=\"\${$_k:-}\""
+    [ -n "$_v" ] || _v="$4"
+    eval "$1=\"\$_v\""
+    return 0
+}
+
+warn_logged() { grep -q "$1" "$WARN_LOG"; }
+
+check_full() {
+    local cfgjson="$1" label="$2" full
+    full="/tmp/tl-full-$$-${label}.json"
+    printf '%s' "$cfgjson" | jq '{
+        log: { level: "error" },
+        dns: { servers: [ { tag: "dns-server", type: "udp", server: "1.1.1.1" } ], final: "dns-server" },
+        inbounds: [ { type: "tproxy", tag: "tproxy-in", listen: "127.0.0.1", listen_port: 1602 } ],
+        outbounds: (.outbounds + [ { type: "direct", tag: "direct-out" } ]),
+        route: { rules: [], final: "direct-out" }
+    }' > "$full" 2>/dev/null
+    if sing-box -c "$full" check > /dev/null 2>&1; then
+        echo "${label}:OK"
+    else
+        echo "${label}:FAIL"
+    fi
+    rm -f "$full"
+}
+
+# Multi-line synthetic blob: vless (line1) + vless (line2) + blank line +
+# ss+CRLF (line3 carries a trailing \r) + unsupported tuic (line4). The CRLF on
+# the ss line proves the trailing \r is stripped: it sits right after the
+# `:8388` port, so an un-stripped \r would corrupt the port and the member would
+# NOT build (a decisive gate, unlike a CR buried in a query string). Built with
+# printf so the \r and the blank line are real bytes inside one scalar value.
+TL_BLOB="$(printf '%s\n%s\n\n%s\r\n%s\n' \
+    'vless://11111111-2222-3333-4444-555555555555@v1.example.com:443?security=tls&sni=v1.example.com' \
+    'vless://aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee@v2.example.com:443?security=tls&sni=v2.example.com' \
+    'ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@s1.example.com:8388' \
+    'tuic://uuid:pw@t1.example.com:443')"
+
+# ── selector_text ────────────────────────────────────────────────────────────
+config='{"outbounds":[]}'
+SUBSCRIPTION_UNAVAILABLE_SECTIONS=""
+TL_seltxt_connection_type="proxy"
+TL_seltxt_proxy_config_type="selector_text"
+TL_seltxt_selector_proxy_links_text="$TL_BLOB"
+configure_outbound_handler "seltxt"
+seltxt_rc=$?
+[ "$seltxt_rc" = "0" ] && echo 'tl-seltxt-no-abort:OK' || echo "tl-seltxt-no-abort:FAIL (rc=$seltxt_rc)"
+
+# 3 supported members built (seltxt-1 vless, seltxt-2 vless [CRLF line], seltxt-4 ss).
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="seltxt-1-out" and .type=="vless")] | length==1' >/dev/null 2>&1 \
+    && echo 'tl-seltxt-vless1-present:OK' || echo 'tl-seltxt-vless1-present:FAIL'
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="seltxt-2-out" and .type=="vless")] | length==1' >/dev/null 2>&1 \
+    && echo 'tl-seltxt-vless2-present:OK' || echo 'tl-seltxt-vless2-present:FAIL'
+# The ss line carries a trailing CR (CRLF); it must still build with the \r
+# stripped (decisive CRLF-tolerance gate).
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="seltxt-3-out" and .type=="shadowsocks")] | length==1' >/dev/null 2>&1 \
+    && echo 'tl-seltxt-ss-crlf-present:OK' || echo 'tl-seltxt-ss-crlf-present:FAIL'
+
+# Unsupported tuic (line5 → seltxt-4; blank line is collapsed by IFS so it does
+# NOT consume an index) NOT created.
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.tag=="seltxt-4-out")] | length==0' >/dev/null 2>&1 \
+    && echo 'tl-seltxt-tuic-absent:OK' || echo 'tl-seltxt-tuic-absent:FAIL'
+
+# Selector references exactly the 3 real members, default = first (seltxt-1-out).
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.type=="selector")][0].outbounds | (index("seltxt-1-out")!=null and index("seltxt-2-out")!=null and index("seltxt-3-out")!=null and index("seltxt-4-out")==null)' >/dev/null 2>&1 \
+    && echo 'tl-seltxt-members-clean:OK' || echo 'tl-seltxt-members-clean:FAIL'
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.type=="selector")][0].default=="seltxt-1-out"' >/dev/null 2>&1 \
+    && echo 'tl-seltxt-default-first:OK' || echo 'tl-seltxt-default-first:FAIL'
+
+warn_logged "unsupported scheme" && echo 'tl-seltxt-warning-logged:OK' || echo 'tl-seltxt-warning-logged:FAIL'
+check_full "$config" "tl-seltxt-singbox-check"
+
+# ── urltest_text ─────────────────────────────────────────────────────────────
+: > "$WARN_LOG"
+config='{"outbounds":[]}'
+SUBSCRIPTION_UNAVAILABLE_SECTIONS=""
+TL_urltxt_connection_type="proxy"
+TL_urltxt_proxy_config_type="urltest_text"
+TL_urltxt_urltest_proxy_links_text="$TL_BLOB"
+configure_outbound_handler "urltxt"
+urltxt_rc=$?
+[ "$urltxt_rc" = "0" ] && echo 'tl-urltxt-no-abort:OK' || echo "tl-urltxt-no-abort:FAIL (rc=$urltxt_rc)"
+
+# urltest built over the 3 real members (no dangling unsupported tag).
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.type=="urltest")][0].outbounds | (index("urltxt-1-out")!=null and index("urltxt-2-out")!=null and index("urltxt-3-out")!=null and index("urltxt-4-out")==null)' >/dev/null 2>&1 \
+    && echo 'tl-urltxt-urltest-members-clean:OK' || echo 'tl-urltxt-urltest-members-clean:FAIL'
+
+# selector built over [members + urltest tag].
+printf '%s' "$config" | jq -e '[.outbounds[] | select(.type=="selector")][0].outbounds as $o | ($o | index("urltxt-1-out")!=null) and ($o | index("urltxt-urltest-out")!=null)' >/dev/null 2>&1 \
+    && echo 'tl-urltxt-selector-over-urltest:OK' || echo 'tl-urltxt-selector-over-urltest:FAIL'
+
+check_full "$config" "tl-urltxt-singbox-check"
+
+# ── _check_outbound_section returns 0 for a non-empty text option ────────────
+# Pull in the requirements-check chain verbatim and stub config_foreach to drive
+# our single section through it.
+eval "$(awk '/^section_has_configured_outbound\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+eval "$(awk '/^_check_outbound_section\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+eval "$(awk '/^has_outbound_section\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+get_subscription_urls_for_section() { :; }
+config_foreach() { "$1" "chk_seltxt"; "$1" "chk_urltxt"; }
+
+TL_chk_seltxt_connection_type="proxy"
+TL_chk_seltxt_proxy_config_type="selector_text"
+TL_chk_seltxt_selector_proxy_links_text="vless://11111111-2222-3333-4444-555555555555@v1.example.com:443"
+section_has_configured_outbound "chk_seltxt" \
+    && echo 'tl-check-seltxt-found:OK' || echo 'tl-check-seltxt-found:FAIL'
+
+TL_chk_urltxt_connection_type="proxy"
+TL_chk_urltxt_proxy_config_type="urltest_text"
+TL_chk_urltxt_urltest_proxy_links_text="vless://11111111-2222-3333-4444-555555555555@v1.example.com:443"
+section_has_configured_outbound "chk_urltxt" \
+    && echo 'tl-check-urltxt-found:OK' || echo 'tl-check-urltxt-found:FAIL'
+
+rm -f "$WARN_LOG"
+echo 'DONE'
+TLEOF
+    sed -i "s|CONST_LIB|$lib/constants.sh|g; s|FACADE_LIB|$facade_lib|g; s|BIN_PATH|$bin|g" "$drv"
+
+    # Run the driver to a RESULT FILE, then consume tokens in the CURRENT shell
+    # (while read < file — NO pipe) so pass/fail mutate the real counters/gate.
+    sh "$drv" > "$out" 2>/dev/null
+    local saw_done=0 line
+    while IFS= read -r line; do
+        case "$line" in
+            *:OK)   pass "$line" ;;
+            *:FAIL) fail "$line" ;;
+            *:SKIP) skip "$line" ;;
+            DONE)   saw_done=1 ;;
+            *) ;;
+        esac
+    done < "$out"
+    [ "$saw_done" = "1" ] && pass "tl-driver-completed:OK" || fail "tl-driver-completed:FAIL (driver aborted early)"
+    rm -f "$drv" "$out"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Test: Monitor procd-lock fd hygiene (task-035) + monitor-leak (task-036)
 #
 # ROOT CAUSE under test: the long-lived health monitor used to be launched with
@@ -6526,6 +6721,7 @@ main() {
             test_section_isolation
             test_monitor_fd_hygiene
             test_unsupported_skip
+            test_text_list_outbound
             test_diagnostics
             test_subscription
             test_fastest_group
@@ -6554,6 +6750,7 @@ main() {
         isolation)   test_section_isolation ;;
         monfd)       test_monitor_fd_hygiene ;;
         unsupported) test_unsupported_skip ;;
+        textlist)    test_text_list_outbound ;;
         diagnostics) test_diagnostics ;;
         subscription) test_subscription ;;
         fastest)     test_fastest_group ;;
@@ -6576,7 +6773,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription fastest insecure rejected jobstate selfheal dnsdetour suburlopt globalproxy stablecheck extcheck netshiftcheck latesttag ghredirect selfupdate backupguard"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported textlist diagnostics subscription fastest insecure rejected jobstate selfheal dnsdetour suburlopt globalproxy stablecheck extcheck netshiftcheck latesttag ghredirect selfupdate backupguard"
             exit 1
             ;;
     esac

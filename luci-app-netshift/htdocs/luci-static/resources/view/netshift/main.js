@@ -753,6 +753,33 @@ function validateProxyUrl(url) {
   };
 }
 
+// src/validators/validateProxyUrlList.ts
+function validateProxyUrlList(value) {
+  const lines = value.split("\n");
+  let hasLink = false;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index].trim();
+    if (line.length === 0) {
+      continue;
+    }
+    hasLink = true;
+    const validation = validateProxyUrl(line);
+    if (!validation.valid) {
+      return {
+        valid: false,
+        message: `${_("Line")} ${index + 1}: ${validation.message}`
+      };
+    }
+  }
+  if (!hasLink) {
+    return {
+      valid: false,
+      message: _("At least one proxy link must be specified.")
+    };
+  }
+  return { valid: true, message: "" };
+}
+
 // src/helpers/parseValueList.ts
 function parseValueList(value) {
   return value.split(/\n/).map((line) => line.split("//")[0]).join(" ").split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
@@ -6164,6 +6191,7 @@ return baseclass.extend({
   validateOutboundJson,
   validatePath,
   validateProxyUrl,
+  validateProxyUrlList,
   validateShadowsocksUrl,
   validateSocksUrl,
   validateSubnet,

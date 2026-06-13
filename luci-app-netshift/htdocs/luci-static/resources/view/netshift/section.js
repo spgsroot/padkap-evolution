@@ -54,6 +54,8 @@ function createSectionContent(section) {
   o.value("url", _("Connection URL"));
   o.value("selector", _("Selector"));
   o.value("urltest", _("URLTest"));
+  o.value("selector_text", _("Selector (text list)"));
+  o.value("urltest_text", _("URLTest (text list)"));
   o.value("subscription", _("Subscription"));
   o.value("outbound", _("Outbound Config"));
   o.default = "url";
@@ -270,6 +272,35 @@ function createSectionContent(section) {
   };
 
   o = section.taboption(
+    "connection",
+    form.TextValue,
+    "selector_proxy_links_text",
+    _("Selector Proxy Links (one per line)"),
+    _(
+      "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links — one per line",
+    ),
+  );
+  o.depends({ connection_type: "proxy", proxy_config_type: "selector_text" });
+  o.rows = 5;
+  o.wrap = "soft";
+  o.textarea = true;
+  o.rmempty = false;
+  o.validate = function (section_id, value) {
+    // Optional
+    if (!value || value.length === 0) {
+      return true;
+    }
+
+    const validation = main.validateProxyUrlList(value);
+
+    if (validation.valid) {
+      return true;
+    }
+
+    return validation.message;
+  };
+
+  o = section.taboption(
     "subscription",
     form.DynamicList,
     "urltest_proxy_links",
@@ -297,6 +328,35 @@ function createSectionContent(section) {
 
   o = section.taboption(
     "subscription",
+    form.TextValue,
+    "urltest_proxy_links_text",
+    _("URLTest Proxy Links (one per line)"),
+    _(
+      "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links — one per line",
+    ),
+  );
+  o.depends({ connection_type: "proxy", proxy_config_type: "urltest_text" });
+  o.rows = 5;
+  o.wrap = "soft";
+  o.textarea = true;
+  o.rmempty = false;
+  o.validate = function (section_id, value) {
+    // Optional
+    if (!value || value.length === 0) {
+      return true;
+    }
+
+    const validation = main.validateProxyUrlList(value);
+
+    if (validation.valid) {
+      return true;
+    }
+
+    return validation.message;
+  };
+
+  o = section.taboption(
+    "subscription",
     form.ListValue,
     "urltest_check_interval",
     _("URLTest Check Interval"),
@@ -308,6 +368,7 @@ function createSectionContent(section) {
   o.value("5m", _("Every 5 minutes"));
   o.default = "3m";
   o.depends({ connection_type: "proxy", proxy_config_type: "urltest" });
+  o.depends({ connection_type: "proxy", proxy_config_type: "urltest_text" });
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
 
   o = section.taboption(
@@ -322,6 +383,7 @@ function createSectionContent(section) {
   o.default = "50";
   o.rmempty = false;
   o.depends({ connection_type: "proxy", proxy_config_type: "urltest" });
+  o.depends({ connection_type: "proxy", proxy_config_type: "urltest_text" });
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
   o.validate = function (section_id, value) {
     if (!value || value.length === 0) {
@@ -366,6 +428,7 @@ function createSectionContent(section) {
   o.default = "https://www.gstatic.com/generate_204";
   o.rmempty = false;
   o.depends({ connection_type: "proxy", proxy_config_type: "urltest" });
+  o.depends({ connection_type: "proxy", proxy_config_type: "urltest_text" });
   o.depends({ connection_type: "proxy", proxy_config_type: "subscription" });
 
   o.validate = function (section_id, value) {

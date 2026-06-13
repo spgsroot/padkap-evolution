@@ -1689,3 +1689,43 @@ findings; keep under ~200 lines.
   env quirk; suite EXIT=0). PRIVACY: synthetic codepoint-built flag tags only,
   no real subscription URL/host/id anywhere. NO sacred constant/port/mark/path/
   UCI-schema/frontend/main.js change.
+
+## task-051 — text-list selector/urltest (selector_text / urltest_text)
+- TWO new proxy_config_type values + TWO scalar UCI options
+  (`selector_proxy_links_text` / `urltest_proxy_links_text`): a multi-line
+  textarea blob, one link per line. Behaviour identical to the LIST-based
+  `selector`/`urltest`; ONLY the input shape differs.
+- Refactored the duplicated per-link member-build loop (was inline in `selector)`
+  and `urltest)`) into ONE shared helper
+  `_build_proxy_member_outbounds <section> <links_blob> <udp_over_tcp> <label>`.
+  It mutates GLOBAL `$config` in place (documented, same discipline the
+  subscription in-shell loop uses) and reports via TWO globals the caller reads:
+  `_member_outbound_tags` (comma-joined) + `_member_default_outbound` (first
+  member = selector default). Used by all FOUR branches. Echo-and-reassign for
+  the FINAL cm_add_selector/urltest stays in each branch.
+- LINE PARSING: `for link in $blob` already word-splits on IFS incl. newlines.
+  KEY GOTCHA: a BLANK line is collapsed by IFS BEFORE the loop body, so it does
+  NOT consume the `$i` index — members are numbered by NON-blank tokens only
+  (blank between link2 and link3 ⇒ ss is `<section>-3`, not `-4`). CRLF: strip a
+  trailing CR per link with `cr="$(printf '\r')"; link="${link%"$cr"}"` then skip
+  empties. A CR buried in a query string is harmless (facade tolerates it); put
+  the CRLF on a bare `ss://host:port` line to make CR-strip a DECISIVE gate.
+- `section_has_configured_outbound` (the fn `_check_outbound_section` delegates
+  to) got `selector_text)`/`urltest_text)` cases returning 0 when the text option
+  is non-empty; added both option names to the "Outbound section not found …
+  missing …" error string.
+- Empty links = `fatal`+`exit 1` (mirrors existing branches verbatim);
+  all-unsupported = `mark_section_outbound_unavailable` + clear error.
+- TEST `test_text_list_outbound` (alias `textlist`): awk-extracts the SHIPPED
+  helper+handler+marker+`section_has_configured_outbound` chain, table-driven
+  config_get stub, real `sing-box check` via `check_full`. GATING FIX vs
+  `test_unsupported_skip` (which uses `cmd | while read` ⇒ counters lost in
+  subshell): write driver output to a FILE, then `while read … < file` in the
+  CURRENT shell so pass/fail mutate real PASS/FAIL and the suite gates.
+  SELF-PROVED: comment out the CR-strip line ⇒ `tl-seltxt-ss-crlf-present`
+  (+ downstream members-clean) FAIL, suite EXIT=1. Restored ⇒ 16/0.
+- Gates: shellcheck -S error CLEAN (bin+libs+install.sh+tests). `smoke-tests all`
+  202→218 passed / 0 failed (+16). PRIVACY: synthetic vless://uuid@…/ss://b64@…
+  /tuic:// placeholders only — no real link/sub data. NO sacred
+  constant/port/mark/path change; UCI schema ADDITIVE + back-compat; FRONTEND
+  untouched (parallel agent owns section.js/TS/i18n/main.js).

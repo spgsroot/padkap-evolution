@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: NETSHIFT\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-12 08:52+0300\n"
-"PO-Revision-Date: 2026-06-12 08:52+0300\n"
+"POT-Creation-Date: 2026-06-13 14:14+0300\n"
+"PO-Revision-Date: 2026-06-13 14:14+0300\n"
 "Last-Translator: yandexru45\n"
 "Language-Team: none\n"
 "Language: ru\n"
@@ -55,6 +55,9 @@ msgstr "Обеспечивает доступ к YACD из WAN. Убедитес
 
 msgid "Applicable for SOCKS and Shadowsocks proxy"
 msgstr "Применимо для SOCKS и Shadowsocks прокси"
+
+msgid "At least one proxy link must be specified."
+msgstr "Необходимо указать хотя бы одну прокси-ссылку."
 
 msgid "At least one valid domain must be specified. Comments-only content is not allowed."
 msgstr "Необходимо указать хотя бы один действительный домен. Содержимое только из комментариев не допускается."
@@ -572,6 +575,9 @@ msgstr "Последняя"
 msgid "Latest version is installed"
 msgstr "Установлена последняя версия"
 
+msgid "Line"
+msgstr "Строка"
+
 msgid "List Update Frequency"
 msgstr "Частота обновления списков"
 
@@ -803,8 +809,14 @@ msgstr "Выберите WAN интерфейсы для мониторинга"
 msgid "Selector"
 msgstr "Selector"
 
+msgid "Selector (text list)"
+msgstr "Selector (текстовый список)"
+
 msgid "Selector Proxy Links"
 msgstr "Ссылки прокси для Selector"
+
+msgid "Selector Proxy Links (one per line)"
+msgstr "Прокси-ссылки Selector (по одной в строке)"
 
 msgid "Self-update failed"
 msgstr "Не удалось обновить"
@@ -992,11 +1004,17 @@ msgstr "URL должен использовать один из следующи
 msgid "URLTest"
 msgstr "URLTest"
 
+msgid "URLTest (text list)"
+msgstr "URLTest (текстовый список)"
+
 msgid "URLTest Check Interval"
 msgstr "Интервал проверки URLTest"
 
 msgid "URLTest Proxy Links"
 msgstr "Ссылки прокси для URLTest"
+
+msgid "URLTest Proxy Links (one per line)"
+msgstr "Прокси-ссылки URLTest (по одной в строке)"
 
 msgid "URLTest Testing URL"
 msgstr "URLTest ссылка для проверки"
@@ -1042,6 +1060,9 @@ msgstr "Перейти в wiki"
 
 msgid "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links"
 msgstr "ссылки vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2://"
+
+msgid "vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// links — one per line"
+msgstr "Ссылки vless://, vmess://, ss://, trojan://, socks4/5://, hy2/hysteria2:// — по одной в строке"
 
 msgid "Warning: %s cannot be used together with %s. Previous selections have been removed."
 msgstr "Предупреждение: %s нельзя использовать вместе с %s. Предыдущие варианты были удалены."

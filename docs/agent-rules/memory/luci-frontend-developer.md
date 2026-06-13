@@ -861,3 +861,64 @@ append findings; keep under ~200 lines.
   conditional prefix-length field appearing only on mode=prefix, taboption
   auto-hide) needs a HUMAN VISUAL CHECK before merge — verified structurally
   only (taboption completeness, depends preserved).
+
+## task-051 — text-list Selector/URLTest (paste links, one per line)
+
+- CROSS-LAYER CONTRACT (backend done first): proxy_config_type values
+  `selector_text` / `urltest_text`; scalar UCI options (textarea, one link per
+  line) `selector_proxy_links_text` / `urltest_proxy_links_text`. Matched VERBATIM.
+- section.js (HAND-WRITTEN, NOT bundled → 0 main.js diff): (a) 2 new
+  `o.value("selector_text",_("Selector (text list)"))` /
+  `o.value("urltest_text",_("URLTest (text list)"))` after the `urltest` value.
+  (b) 2 `form.TextValue` textareas modelled on the `url`-type `proxy_string`
+  one (`o.textarea=true; o.rows=5; o.wrap="soft"; o.rmempty=false`): placed
+  `selector_proxy_links_text` in the **connection** tab next to the existing
+  `selector_proxy_links` DynamicList, and `urltest_proxy_links_text` in the
+  **subscription** tab next to `urltest_proxy_links` (mirror the tab each
+  list-typed sibling already lives in — they differ!). Each `o.validate` calls
+  `main.validateProxyUrlList`.
+- URLTEST-TWIN GATING: the 3 urltest tuning fields (urltest_check_interval,
+  urltest_tolerance, urltest_testing_url) each had `depends urltest` + `depends
+  subscription`; added a 3rd `o.depends({connection_type:"proxy",
+  proxy_config_type:"urltest_text"})` to each (CBI ORs depends). DID NOT touch
+  `enable_udp_over_tcp` (gated on `connection_type:"proxy"` only → already shows
+  for urltest_text) nor the subscription-only grouping/filter fields. The
+  `urltest_proxy_links` DynamicList itself stays urltest-only (its text variant
+  is the NEW separate field) — grep `proxy_config_type:"urltest"` leaves exactly
+  4 hits: the DynamicList + 3 tuning fields.
+- NEW VALIDATOR `validateProxyUrlList(value:string):ValidationResult` — splits on
+  `\n`, `.trim()` each line (so CRLF `\r` is stripped), skips blank lines, runs
+  the EXISTING `validateProxyUrl` per line, returns first failure as
+  `{valid:false, message:`${_('Line')} ${i+1}: ${msg}`}` (1-based incl. blank
+  lines in the count) or `{valid:true,message:''}`. Empty/blank-only →
+  `_('At least one proxy link must be specified.')`. ValidationResult REQUIRES
+  `message:string` so valid branch sets `message:''`. BARREL-EXPORTED via
+  `validators/index.ts` (`export * from './validateProxyUrlList'`) → reaches
+  `main.validateProxyUrlList`. This is an EXPORTED leaf (NOT dispatcher-only like
+  validateHysteria2Url/validateVmessUrl) because section.js calls it directly.
+- main.js: EXPECTED +28-line diff (the bundled validator fn + 1 export-block
+  entry). Export-symbol set delta vs HEAD = EXACTLY `+ validateProxyUrlList`
+  (no leak). Build IDEMPOTENT (md5 e5273ea1… across 2 builds), banner +
+  `return baseclass.extend({` intact. The regenerated main.js IS the deliverable.
+- TEST `validators/tests/validateProxyUrlList.test.js`: table-driven describe.each
+  (valid blobs incl. CRLF/blank-line/whitespace; invalid incl. empty/unsupported/
+  garbage) + line-number-context assertions. SS fixture is the KNOWN-VALID
+  `ss://2022-blake3-aes-256-gcm:dmCly/…=@127.0.0.1:27214?type=tcp` form copied
+  from validateShadowsocksUrl.test.js (do NOT invent base64 that may fail). VLESS
+  fixture copied from validateVlessUrl.test.js. 13 tests; total 485 pass.
+- i18n: 7 NEW msgids (Selector (text list); URLTest (text list); Selector Proxy
+  Links (one per line); URLTest Proxy Links (one per line); the shared scheme-doc
+  desc "…links — one per line"; "Line"; "At least one proxy link must be
+  specified."). RU filled in SOURCE locales/netshift.ru.po then distribute →
+  po/ru + po/templates byte-identical (diff -q). msgid count 352→359 purely
+  additive. Ran `node {extract-calls,generate-pot,generate-po ru,distribute}.js`
+  (generate-pot needs git user.name set). 1 empty msgstr remains = header only.
+- PRIVACY: all link strings synthetic (`127.0.0.1` hosts + scheme-doc literals);
+  no real proxy/subscription data anywhere.
+- GATES GREEN: prettier --write src (all unchanged → no format churn beyond my
+  files), eslint --max-warnings=0, vitest 485 pass, tsup build. yarn classic
+  1.22.22 → ran via node_modules/.bin; yarn.lock unchanged, no .yarn/.yarnrc.yml.
+- FLAG (no browser in env): the rendered Connection/Subscription tabs (2 new
+  dropdown choices, the 2 textareas appearing only for their type, the urltest
+  tuning fields now appearing for urltest_text) need a HUMAN VISUAL CHECK —
+  verified structurally only (taboption completeness, depends grep).

@@ -1411,3 +1411,41 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
 - This is a natural extension of task-044/045 (universal grouper). Performance
   caveat on record: nested probing = extra load; tunable via the section's
   urltest_check_interval/tolerance.
+
+## task-051 Text-list Selector/URLTest — issue #10 — CLOSED, APPROVED (2026-06-13)
+- REQUEST (Naxeron #10 + killyourgod TG): paste many proxy links (one per line)
+  into a textarea -> build a Selector or URLTest. KEY FINDING: the backend ALREADY
+  built selector/urltest from a LIST of links (proxy_config_type selector/urltest
+  reading selector_proxy_links/urltest_proxy_links via `for link in $...`). The
+  only gap was the INPUT shape (DynamicList = add-one-by-one). The `url` type
+  already used a textarea (scalar proxy_string).
+- OPERATOR DECISION: TWO NEW types `selector_text`/`urltest_text` (keep the
+  existing DynamicList ones), labels "Selector (text list)"/"URLTest (text list)",
+  textarea storing SCALAR options selector_proxy_links_text/urltest_proxy_links_text.
+- BACKEND: refactored the duplicated per-link build loop into ONE shared helper
+  `_build_proxy_member_outbounds <section> <blob> <udp_over_tcp> <label>` used by
+  ALL FOUR branches. It MUTATES global $config in place + reports via globals
+  _member_outbound_tags/_member_default_outbound which it RESETS at the top of
+  each call (no stale leak across config_foreach sections — the key refactor
+  risk, verified safe). Line parsing: `for link in $blob` IFS-splits newlines +
+  spaces; trailing CR stripped (`cr=$(printf '\r'); link="${link%"$cr"}"`); blanks
+  skipped. Empty->fatal+exit1; all-unsupported->mark_section_outbound_unavailable.
+  section_has_configured_outbound + the missing-fields message updated.
+- FRONTEND: 2 dropdown values + 2 textareas (taboption in the SAME tab as their
+  list-typed siblings: selector_text->connection, urltest_text->subscription);
+  urltest tuning fields (interval/tolerance/testing_url) got urltest_text
+  depends-twins. New validator validateProxyUrlList (split \n, trim/CRLF, skip
+  blanks, validateProxyUrl per line, 1-based line-context error) barrel-exported
+  -> main.validateProxyUrlList; 13-case vitest. 7 i18n msgids + RU, fe<->luci
+  byte-identical. main.js +28 (validator), fresh build = no further diff.
+- PARALLEL EXECUTION: backend + frontend launched in parallel (disjoint files,
+  shared only by the UCI contract). Both subagents truncated mid-work (recurring
+  this session) -> resumed each + verified on-disk state myself.
+- GATES: shellcheck error clean; smoke 202->218/0 (+16 textlist tokens, gating;
+  real in-container sing-box check for BOTH new types); yarn ci green (485
+  vitest); main.js freshly-built. Reviews: backend APPROVED; frontend APPROVED
+  WITH CONDITIONS ([C1] non-code: human visual check of the rendered tabs — no
+  browser in CI, main.js only carries the validator delta).
+- REUSABLE: when a "new input type" request lands, FIRST check if the backend
+  already supports the underlying data (it often does) — the work may be purely
+  a FE input-shape change + a thin backend branch reusing the existing build.

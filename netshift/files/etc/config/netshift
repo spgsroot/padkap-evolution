@@ -86,5 +86,28 @@ config section 'main'
 #        #list subscription_filter_include_keywords 'grpc'
 #        # Keyword blacklist: drop any node whose display name contains any of
 #        # these (OR). Empty/absent = no exclusion.
-#        #list subscription_filter_exclude_keywords 'expired'
-#        list community_lists 'russia_inside'
+ #        #list subscription_filter_exclude_keywords 'expired'
+ #        list community_lists 'russia_inside'
+
+# Text-list Selector / URLTest: paste proxy links into a single multi-line
+# textarea option (one link per line) instead of one DynamicList item each. The
+# supported links (vless/vmess/ss/trojan/hysteria2/socks) are built into a
+# Selector ('selector_text') or a URLTest + selector ('urltest_text'); blank
+# lines and unsupported schemes are skipped. The value is a scalar newline-
+# delimited blob — NOT a UCI list.
+#config section 'selector_text_example'
+#        option connection_type 'proxy'
+#        option proxy_config_type 'selector_text'
+#        # one link per line in a single multi-line option value
+#        option selector_proxy_links_text 'vless://example-node-1
+#vless://example-node-2'
+
+#config section 'urltest_text_example'
+#        option connection_type 'proxy'
+#        option proxy_config_type 'urltest_text'
+#        # one link per line in a single multi-line option value
+#        option urltest_proxy_links_text 'vless://example-node-1
+#vless://example-node-2'
+#        #option urltest_check_interval '3m'
+#        #option urltest_tolerance '50'
+#        #option urltest_testing_url 'https://www.gstatic.com/generate_204'

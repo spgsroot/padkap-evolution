@@ -80,7 +80,7 @@ check_requirements() {
     if has_outbound_section; then
         log "Outbound section found" "debug"
     else
-        log "Outbound section not found. Please check your configuration file (missing proxy_string, selector_proxy_links, urltest_proxy_links, subscription_url, outbound_json, or interface according to connection_type/proxy_config_type). Aborted." "error"
+        log "Outbound section not found. Please check your configuration file (missing proxy_string, selector_proxy_links, urltest_proxy_links, selector_proxy_links_text, urltest_proxy_links_text, subscription_url, outbound_json, or interface according to connection_type/proxy_config_type). Aborted." "error"
         exit 1
     fi
 }
@@ -110,6 +110,16 @@ section_has_configured_outbound() {
             local urltest_proxy_links
             config_get urltest_proxy_links "$section" "urltest_proxy_links"
             [ -n "$urltest_proxy_links" ] && return 0
+            ;;
+        selector_text)
+            local selector_proxy_links_text
+            config_get selector_proxy_links_text "$section" "selector_proxy_links_text"
+            [ -n "$selector_proxy_links_text" ] && return 0
+            ;;
+        urltest_text)
+            local urltest_proxy_links_text
+            config_get urltest_proxy_links_text "$section" "urltest_proxy_links_text"
+            [ -n "$urltest_proxy_links_text" ] && return 0
             ;;
         outbound)
             local outbound_json
@@ -2314,6 +2324,61 @@ is_truthy_option() {
     esac
 }
 
+# Shared per-link member-outbound builder for the selector/urltest/selector_text/
+# urltest_text proxy types. Iterates a whitespace/newline-separated blob of proxy
+# links, creating one outbound per supported link via the facade and collecting
+# their tags. Unsupported schemes are skipped with a warn (the facade echoes the
+# config UNCHANGED and returns non-zero, so a single bad link never wipes the
+# config nor leaves a selector referencing a non-existent outbound). A trailing
+# CR (pasted CRLF blobs) is stripped per link and blank lines are skipped, so the
+# text-list types tolerate pasted multi-line input. POSIX ash, no Oniguruma.
+#
+# Mutates the GLOBAL $config in place (same echo-and-reassign discipline as the
+# subscription branch uses for its in-shell loop) and reports results via two
+# GLOBALS the caller reads after the call:
+#   _member_outbound_tags    comma-joined member outbound tags (empty if none)
+#   _member_default_outbound first member tag (selector default; empty if none)
+# Args: <section> <links_blob> <udp_over_tcp> <label>
+_build_proxy_member_outbounds() {
+    local section="$1"
+    local links_blob="$2"
+    local udp_over_tcp="$3"
+    local label="$4"
+    local link i outbound_tag _new_config cr
+
+    _member_outbound_tags=""
+    _member_default_outbound=""
+    cr="$(printf '\r')"
+
+    i=1
+    for link in $links_blob; do
+        # Tolerate pasted CRLF blobs: strip a trailing CR and skip blank lines.
+        link="${link%"$cr"}"
+        [ -n "$link" ] || continue
+
+        # The facade returns non-zero (config echoed UNCHANGED) for an
+        # unsupported scheme. Only add the member tag when the outbound was
+        # actually created, so the selector/urltest never references a
+        # non-existent outbound; a single bad link is skipped and the remaining
+        # links still build. Reassign $config only on a non-empty result so a
+        # skip never wipes the config.
+        if _new_config="$(sing_box_cf_add_proxy_outbound "$config" "$section-$i" "$link" "$udp_over_tcp")" \
+            && [ -n "$_new_config" ]; then
+            config="$_new_config"
+            outbound_tag="$(get_outbound_tag_by_section "$section-$i")"
+            if [ -z "$_member_outbound_tags" ]; then
+                _member_outbound_tags="$outbound_tag"
+                _member_default_outbound="$outbound_tag"
+            else
+                _member_outbound_tags="$_member_outbound_tags,$outbound_tag"
+            fi
+        else
+            log "$label section '$section' link #$i uses an unsupported scheme; skipping it" "warn"
+        fi
+        i=$((i + 1))
+    done
+}
+
 configure_outbound_handler() {
     local section="$1"
 
@@ -2360,7 +2425,7 @@ configure_outbound_handler() {
             ;;
         selector)
             log "Detected proxy configuration type: selector" "debug"
-            local selector_proxy_links udp_over_tcp i outbound_tags outbound_tag default_outbound _new_config
+            local selector_proxy_links udp_over_tcp selector_tag selector_outbounds
             config_get selector_proxy_links "$section" "selector_proxy_links"
             config_get udp_over_tcp "$section" "enable_udp_over_tcp"
 
@@ -2369,44 +2434,22 @@ configure_outbound_handler() {
                 exit 1
             fi
 
-            i=1
-            for link in $selector_proxy_links; do
-                # The facade returns non-zero (config echoed UNCHANGED) for an
-                # unsupported scheme. Only add the member tag when the outbound
-                # was actually created, so the selector never references a
-                # non-existent outbound; a single bad link is skipped and the
-                # remaining links still build. Reassign $config only on a
-                # non-empty result so a skip never wipes the config.
-                if _new_config="$(sing_box_cf_add_proxy_outbound "$config" "$section-$i" "$link" "$udp_over_tcp")" \
-                    && [ -n "$_new_config" ]; then
-                    config="$_new_config"
-                    outbound_tag="$(get_outbound_tag_by_section "$section-$i")"
-                    if [ -z "$outbound_tags" ]; then
-                        outbound_tags="$outbound_tag"
-                        default_outbound="$outbound_tag"
-                    else
-                        outbound_tags="$outbound_tags,$outbound_tag"
-                    fi
-                else
-                    log "Selector section '$section' link #$i uses an unsupported scheme; skipping it" "warn"
-                fi
-                i=$((i + 1))
-            done
+            _build_proxy_member_outbounds "$section" "$selector_proxy_links" "$udp_over_tcp" "Selector"
 
-            if [ -z "$outbound_tags" ]; then
+            if [ -z "$_member_outbound_tags" ]; then
                 echolog "Selector section '$section' has no usable links (all unsupported); its traffic will be rejected until a supported link is configured" "error"
                 mark_section_outbound_unavailable "$section"
             else
                 selector_tag="$(get_outbound_tag_by_section "$section")"
-                selector_outbounds="$(comma_string_to_json_array "$outbound_tags")"
+                selector_outbounds="$(comma_string_to_json_array "$_member_outbound_tags")"
                 config="$(sing_box_cm_add_selector_outbound "$config" "$selector_tag" "$selector_outbounds" \
-                    "$default_outbound" "true")"
+                    "$_member_default_outbound" "true")"
             fi
             ;;
         urltest)
             log "Detected proxy configuration type: urltest" "debug"
-            local urltest_proxy_links udp_over_tcp i urltest_tag selector_tag outbound_tag outbound_tags \
-                urltest_outbounds selector_outbounds urltest_check_interval urltest_tolerance urltest_testing_url _new_config
+            local urltest_proxy_links udp_over_tcp urltest_tag selector_tag \
+                urltest_outbounds selector_outbounds urltest_check_interval urltest_tolerance urltest_testing_url
             config_get urltest_proxy_links "$section" "urltest_proxy_links"
             config_get udp_over_tcp "$section" "enable_udp_over_tcp"
             config_get urltest_check_interval "$section" "urltest_check_interval" "3m"
@@ -2418,37 +2461,69 @@ configure_outbound_handler() {
                 exit 1
             fi
 
-            i=1
-            for link in $urltest_proxy_links; do
-                # The facade returns non-zero (config echoed UNCHANGED) for an
-                # unsupported scheme. Only add the member tag when the outbound
-                # was actually created, so the urltest/selector never references
-                # a non-existent outbound; a single bad link is skipped and the
-                # remaining links still build. Reassign $config only on a
-                # non-empty result so a skip never wipes the config.
-                if _new_config="$(sing_box_cf_add_proxy_outbound "$config" "$section-$i" "$link" "$udp_over_tcp")" \
-                    && [ -n "$_new_config" ]; then
-                    config="$_new_config"
-                    outbound_tag="$(get_outbound_tag_by_section "$section-$i")"
-                    if [ -z "$outbound_tags" ]; then
-                        outbound_tags="$outbound_tag"
-                    else
-                        outbound_tags="$outbound_tags,$outbound_tag"
-                    fi
-                else
-                    log "URLTest section '$section' link #$i uses an unsupported scheme; skipping it" "warn"
-                fi
-                i=$((i + 1))
-            done
+            _build_proxy_member_outbounds "$section" "$urltest_proxy_links" "$udp_over_tcp" "URLTest"
 
-            if [ -z "$outbound_tags" ]; then
+            if [ -z "$_member_outbound_tags" ]; then
                 echolog "URLTest section '$section' has no usable links (all unsupported); its traffic will be rejected until a supported link is configured" "error"
                 mark_section_outbound_unavailable "$section"
             else
                 urltest_tag="$(get_outbound_tag_by_section "$section-urltest")"
                 selector_tag="$(get_outbound_tag_by_section "$section")"
-                urltest_outbounds="$(comma_string_to_json_array "$outbound_tags")"
-                selector_outbounds="$(comma_string_to_json_array "$outbound_tags,$urltest_tag")"
+                urltest_outbounds="$(comma_string_to_json_array "$_member_outbound_tags")"
+                selector_outbounds="$(comma_string_to_json_array "$_member_outbound_tags,$urltest_tag")"
+                config="$(sing_box_cm_add_urltest_outbound "$config" "$urltest_tag" "$urltest_outbounds" \
+                    "$urltest_testing_url" "$urltest_check_interval" "$urltest_tolerance")"
+                config="$(sing_box_cm_add_selector_outbound "$config" "$selector_tag" "$selector_outbounds" "$urltest_tag" "true")"
+            fi
+            ;;
+        selector_text)
+            log "Detected proxy configuration type: selector_text" "debug"
+            local selector_text_links udp_over_tcp selector_tag selector_outbounds
+            config_get selector_text_links "$section" "selector_proxy_links_text"
+            config_get udp_over_tcp "$section" "enable_udp_over_tcp"
+
+            if [ -z "$selector_text_links" ]; then
+                log "URLTest proxy links is not set. Aborted." "fatal"
+                exit 1
+            fi
+
+            _build_proxy_member_outbounds "$section" "$selector_text_links" "$udp_over_tcp" "Selector"
+
+            if [ -z "$_member_outbound_tags" ]; then
+                echolog "Selector section '$section' has no usable links (all unsupported); its traffic will be rejected until a supported link is configured" "error"
+                mark_section_outbound_unavailable "$section"
+            else
+                selector_tag="$(get_outbound_tag_by_section "$section")"
+                selector_outbounds="$(comma_string_to_json_array "$_member_outbound_tags")"
+                config="$(sing_box_cm_add_selector_outbound "$config" "$selector_tag" "$selector_outbounds" \
+                    "$_member_default_outbound" "true")"
+            fi
+            ;;
+        urltest_text)
+            log "Detected proxy configuration type: urltest_text" "debug"
+            local urltest_text_links udp_over_tcp urltest_tag selector_tag \
+                urltest_outbounds selector_outbounds urltest_check_interval urltest_tolerance urltest_testing_url
+            config_get urltest_text_links "$section" "urltest_proxy_links_text"
+            config_get udp_over_tcp "$section" "enable_udp_over_tcp"
+            config_get urltest_check_interval "$section" "urltest_check_interval" "3m"
+            config_get urltest_tolerance "$section" "urltest_tolerance" 50
+            config_get urltest_testing_url "$section" "urltest_testing_url" "https://www.gstatic.com/generate_204"
+
+            if [ -z "$urltest_text_links" ]; then
+                log "URLTest proxy links is not set. Aborted." "fatal"
+                exit 1
+            fi
+
+            _build_proxy_member_outbounds "$section" "$urltest_text_links" "$udp_over_tcp" "URLTest"
+
+            if [ -z "$_member_outbound_tags" ]; then
+                echolog "URLTest section '$section' has no usable links (all unsupported); its traffic will be rejected until a supported link is configured" "error"
+                mark_section_outbound_unavailable "$section"
+            else
+                urltest_tag="$(get_outbound_tag_by_section "$section-urltest")"
+                selector_tag="$(get_outbound_tag_by_section "$section")"
+                urltest_outbounds="$(comma_string_to_json_array "$_member_outbound_tags")"
+                selector_outbounds="$(comma_string_to_json_array "$_member_outbound_tags,$urltest_tag")"
                 config="$(sing_box_cm_add_urltest_outbound "$config" "$urltest_tag" "$urltest_outbounds" \
                     "$urltest_testing_url" "$urltest_check_interval" "$urltest_tolerance")"
                 config="$(sing_box_cm_add_selector_outbound "$config" "$selector_tag" "$selector_outbounds" "$urltest_tag" "true")"
