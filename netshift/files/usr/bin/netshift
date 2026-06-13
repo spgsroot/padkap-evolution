@@ -2684,7 +2684,8 @@ configure_outbound_handler() {
 
                 if [ "$group_mode" != "off" ]; then
                     local grouping_json group_key group_outbounds group_tag group_keys_tmp \
-                        selector_outbounds_json selector_default ungrouped_outbounds_json grouped_count ungrouped_count
+                        selector_outbounds_json selector_default ungrouped_outbounds_json grouped_count ungrouped_count \
+                        group_tags_json group_tags_count fastest_tag
 
                     grouping_json="$(sing_box_build_subscription_groups "$subscription_outbound_tags_json" "$group_mode" "$prefix_len")"
                     if [ -z "$grouping_json" ]; then
@@ -2731,6 +2732,34 @@ configure_outbound_handler() {
                         selector_outbounds_json="[]"
                     fi
 
+                    # At this point $selector_outbounds_json holds ONLY the
+                    # per-group urltest tags ("<key> Fastest"), before ungrouped
+                    # nodes are appended below. Capture that group-only list so
+                    # we can build a top-level "Fastest" urltest OVER the groups
+                    # (a urltest of urltests) and default the selector to it.
+                    group_tags_json="$selector_outbounds_json"
+                    group_tags_count="$(printf '%s' "$group_tags_json" | jq -r 'length' 2>/dev/null)"
+                    [ -n "$group_tags_count" ] || group_tags_count=0
+
+                    fastest_tag=""
+                    # Only nest when there are >= 2 groups. With exactly 1 group
+                    # the lone group urltest IS already the fastest (a urltest
+                    # over a single member is redundant), so we skip the extra
+                    # layer and fall back to the lone group as the default. With
+                    # 0 groups (everything ungrouped) there is nothing to nest;
+                    # never emit an empty-member urltest.
+                    if [ "$group_tags_count" -ge 2 ]; then
+                        fastest_tag="$(sing_box_get_unique_outbound_tag "$config" "$SB_SUBSCRIPTION_FASTEST_GROUP_TAG")"
+                        # Reuse the section's urltest probe knobs (testing URL,
+                        # check interval, tolerance) so the extra probe layer's
+                        # cadence stays user-tunable; do NOT hardcode an
+                        # aggressive interval. This adds one more probe layer
+                        # (Fastest tests each group; each group tests its nodes).
+                        config="$(sing_box_cm_add_urltest_outbound "$config" "$fastest_tag" "$group_tags_json" \
+                            "$urltest_testing_url" "$urltest_check_interval" "$urltest_tolerance")"
+                        selector_outbounds_json="$(jq -acn --arg t "$fastest_tag" --argjson rest "$selector_outbounds_json" '[$t] + $rest')"
+                    fi
+
                     ungrouped_outbounds_json="$(echo "$grouping_json" | jq -c '.ungrouped // []' 2>/dev/null)"
                     if [ -n "$ungrouped_outbounds_json" ] && [ "$ungrouped_outbounds_json" != "[]" ]; then
                         selector_outbounds_json=$(
@@ -2744,7 +2773,16 @@ configure_outbound_handler() {
                         exit 1
                     fi
 
-                    selector_default="$(echo "$selector_outbounds_json" | jq -r '.[0] // ""' 2>/dev/null)"
+                    if [ -n "$fastest_tag" ]; then
+                        # >= 2 groups: the cross-group "Fastest" urltest is the
+                        # default (it was prepended above, so it is also .[0]).
+                        selector_default="$fastest_tag"
+                    else
+                        # 0 or 1 groups: keep the existing "first element"
+                        # default (the lone group urltest, or the first
+                        # ungrouped node).
+                        selector_default="$(echo "$selector_outbounds_json" | jq -r '.[0] // ""' 2>/dev/null)"
+                    fi
                     if [ -z "$selector_default" ] || [ "$selector_default" = "null" ]; then
                         log "Unable to determine default selector outbound for section '$section'. Aborted." "fatal"
                         exit 1

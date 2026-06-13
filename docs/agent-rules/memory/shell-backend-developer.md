@@ -1619,3 +1619,73 @@ findings; keep under ~200 lines.
 - Gates: shellcheck -S error clean (bin+libs+install.sh); `smoke-tests all`
   190→196 passed / 0 failed (+6 ghredirect). NO sacred constant/port/mark/path/
   schema/frontend change.
+
+## task-050: "Fastest" cross-group urltest of urltests (grouping-on default)
+
+- New constant `SB_SUBSCRIPTION_FASTEST_GROUP_TAG="⚡ Fastest"` (constants.sh,
+  sing-box Outbounds group, valid UTF-8) — single source for the top-level
+  cross-group urltest tag. Per-group tags stay the inline literal
+  `"$group_key Fastest"` (NOT a constant; the spec only added the cross-group
+  one). Lightning glyph is deliberately distinct from a per-group `<flag>
+  Fastest` so the auto choice is tellable apart in the dashboard.
+- Grouped branch (bin/netshift `configure_outbound_handler`, subscription
+  `group_mode != off`): after the per-group urltest loop fills
+  `selector_outbounds_json` with ONLY group tags (before ungrouped is
+  appended), capture `group_tags_json="$selector_outbounds_json"` +
+  `group_tags_count=$(... | jq -r 'length')`. If `>= 2`:
+  `fastest_tag=$(sing_box_get_unique_outbound_tag "$config" "$SB_..._TAG")`,
+  add the nested urltest via `sing_box_cm_add_urltest_outbound "$config"
+  "$fastest_tag" "$group_tags_json" <section's url/interval/tolerance>` (reuse
+  the SECTION's urltest knobs — user-tunable, no hardcoded aggressive
+  interval), prepend with `jq -acn --arg t --argjson rest '[$t] + $rest'`, and
+  set `selector_default="$fastest_tag"`. EDGE: `==1` group → skip nest (lone
+  group already IS fastest; default = `.[0]`); `==0` → no nest, default =
+  first ungrouped. Never emits an empty-member urltest. New locals
+  `group_tags_json group_tags_count fastest_tag`. Existing fatal+exit 1 guards
+  intact. No Oniguruma.
+- WHOLE-CHAIN proven: `sing-box check` ACCEPTS a urltest whose members are
+  other urltest tags (nesting works) — asserted live in-container in the new
+  test. Runtime-contract impact NONE (pure outbound-tree shape).
+- FRONTEND: ZERO change needed. The subscription dashboard
+  (`getDashboardSections.ts` `proxy_config_type === 'subscription'`) maps the
+  LIVE `selector.value.all` and shows each member's `value.name` VERBATIM,
+  EXCEPT it maps ONLY the legacy `${section}-urltest-out` code to `_('Fastest')`
+  (`isLegacyFastest`). The new "⚡ Fastest" gets a DEDUPED synthetic tag (code =
+  the tag, NOT `-urltest-out`), so it renders raw `⚡ Fastest` — same treatment
+  as the per-group `🇷🇺 Fastest` tags. Urltests sort first → it leads the list
+  and is selectable automatically. main.js untouched (correct).
+- TEST `test_fastest_group` (alias `fastest`, after test_subscription; 6
+  tokens). The grouped branch is INLINE shell (not a function), so the driver
+  awk-extracts the WHOLE `if [ "$group_mode" != "off" ]; then ... else ... fi`
+  region VERBATIM (from the `if`-opener through the off-branch's
+  `"$urltest_tag" "true")"` line + the following `fi`; awk q-style: set
+  `seen_else_end` on the off selector line, exit on the next `^\s*fi$`) and
+  wraps it in a driver `_grouped_branch()` so the leading `if ...; then local`
+  is valid. Sources real constants.sh + sing_box_config_manager.sh; awk-extracts
+  `sing_box_get_unique_outbound_tag` + `sing_box_build_subscription_groups`
+  verbatim; stubs `get_outbound_tag_by_section`/`log`. Synthetic flag tags
+  built by codepoint (RU=flag(17,20), DE=flag(3,4)) + a `plain-node` ungrouped
+  + shadowsocks/aes-256-gcm so `sing-box check` accepts. Asserts: (a) one
+  top-level urltest tagged the constant whose outbounds == [ru,de] group tags;
+  (b) selector default == fastest + outbounds == [fastest, ru, de,
+  plain-node]; (c) live `sing-box check` passes WITH the nest; (d) groups==1 →
+  no nested urltest, default = lone group; (e) off → flat 1 urltest, no
+  fastest tag, default == `<section>-urltest-out`. Parsed in the CURRENT shell
+  via per-run `ash "$work/runN.sh" > out.json` (each run sources the spliced
+  driver) → tokens GATE. Registered all 5 points (all)/case alias/usage/compose
+  comment).
+- SPLICE PATTERN (reusable for inline-region extraction): write the driver with
+  a placeholder line `EXTRACT_GROUPED`, then rebuild it as
+  `{ sed '/MARK/q' drv | sed '$d'; cat region; sed -n '/MARK/,$p' drv | sed
+  '1d'; } > drv.spliced; mv`. Replaces exactly the one placeholder line with the
+  arbitrary-content region (no s/// escaping hazard).
+- SELF-PROVED twice: (1) comment out the prepend line → only
+  `fastest-selector-default-membership` FAILs; (2) change the guard to `-ge 99`
+  (never nest) → BOTH `fastest-nested-urltest-members` AND
+  `-selector-default-membership` FAIL. Restored → 6/0.
+- Gates: shellcheck -S error clean (bin + libs + install.sh). `smoke-tests all`
+  196→202 passed / 0 failed (+6 fastest, all counted — current-shell parse).
+  Pre-existing `rh-case1/2/6:FAIL` red marks persist (documented task-031/048
+  env quirk; suite EXIT=0). PRIVACY: synthetic codepoint-built flag tags only,
+  no real subscription URL/host/id anywhere. NO sacred constant/port/mark/path/
+  UCI-schema/frontend/main.js change.

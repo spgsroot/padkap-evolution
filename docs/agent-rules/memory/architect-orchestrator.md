@@ -1379,3 +1379,35 @@ save+`sing-box check` -> cron jobs -> start sing-box -> dnsmasq_configure ->
 - Net result for the user complaint: the normal version-check/self-update/install
   path no longer touches the 60/hr-per-IP api.github.com, so CGNAT/shared-IP
   rate-limit errors should largely disappear; API remains the fallback.
+
+## task-050 "Fastest" urltest-of-urltests — CLOSED, APPROVED (2026-06-13)
+- RESEARCH (confirmed): sing-box urltest.outbounds = "list of outbound tags to
+  test" with NO type restriction -> a urltest CAN nest other urltest tags. At
+  runtime it probes each member THROUGH that member's dial path, so a nested
+  group-urltest member is measured via that group's currently-selected (fastest)
+  node => "fastest country/group" emerges correctly. Maintainer confirms nested
+  urltest runs (SagerNet/sing-box #2130; the failover caveat there is unrelated).
+  `sing-box check` accepts a urltest referencing urltest tags (PROVEN by the
+  smoke's real in-container check).
+- FEATURE: when subscription grouping is ON (country/prefix) AND there are >=2
+  groups, build a top-level urltest "⚡ Fastest" (SB_SUBSCRIPTION_FASTEST_GROUP_TAG)
+  over the per-group urltests, PREPEND it to the main selector, make it the
+  selector DEFAULT. Specific groups + ungrouped stay selectable. ==1 group ->
+  skip the redundant nested layer (default = lone group). ==0 -> no fastest
+  urltest. OFF mode unchanged. Operator: this becomes the default-on-grouping.
+- KEY IMPL DETAIL: capture group_tags_json from selector_outbounds_json BEFORE
+  ungrouped is appended, so the nested urltest nests ONLY group urltests (not raw
+  ungrouped nodes). Reuse the section's urltest knobs (interval/tolerance) — no
+  hardcoded aggressive cadence; documented that it adds one probe layer.
+- NO FRONTEND CHANGE: the dashboard (getDashboardSections.ts) renders selector
+  members live from the Clash structure and shows each member's name verbatim
+  (only legacy `<section>-urltest-out` maps to _('Fastest')). The new deduped
+  "⚡ Fastest" tag (code==tag, not -urltest-out) renders raw like per-group
+  "🇷🇺 Fastest", urltests sort first so it leads + is selectable. main.js untouched.
+- GATES: shellcheck -S error clean; smoke 196->202/0 (+6 fastest tokens, gating;
+  test calls pass/fail directly in the fn body, not a pipe-subshell). Real
+  `sing-box -c check` on the nested config passes (skips cleanly when sing-box
+  absent). Self-proved. Review 1 round APPROVED, no conditions.
+- This is a natural extension of task-044/045 (universal grouper). Performance
+  caveat on record: nested probing = extra load; tunable via the section's
+  urltest_check_interval/tolerance.

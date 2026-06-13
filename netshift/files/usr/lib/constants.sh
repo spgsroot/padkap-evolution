@@ -139,6 +139,12 @@ SB_DIRECT_OUTBOUND_TAG="direct-out"
 # Subscription grouping (task-044). Default codepoint count for prefix-mode
 # grouping when subscription_group_prefix_len is unset/invalid.
 SUBSCRIPTION_GROUP_DEFAULT_PREFIX_LEN=2
+# Subscription grouping (task-050). Tag/label for the top-level "Fastest"
+# urltest that probes ACROSS the per-group urltests (a urltest of urltests)
+# when grouping is on. Valid UTF-8 emoji + English; deliberately distinct from
+# a per-group "<flag> Fastest" tag so the cross-group auto choice is tellable
+# apart in the dashboard. Single source for the tag (keep this file UTF-8).
+SB_SUBSCRIPTION_FASTEST_GROUP_TAG="⚡ Fastest"
 # Route
 SB_REJECT_RULE_TAG="reject-rule-tag"
 SB_EXCLUSION_RULE_TAG="exclusion-rule-tag"

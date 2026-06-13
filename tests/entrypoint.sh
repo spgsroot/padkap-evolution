@@ -3745,6 +3745,259 @@ CCEOF
 }
 
 # ─────────────────────────────────────────────────────────────────
+# Test: "Fastest" cross-group urltest of urltests (task-050)
+#
+# When subscription grouping is ON (country/prefix) and there are >= 2 groups,
+# the grouped branch in bin/netshift adds a top-level urltest tagged
+# $SB_SUBSCRIPTION_FASTEST_GROUP_TAG whose members are the per-group urltests
+# ("<key> Fastest"), PREPENDS it to the main selector, and makes it the selector
+# default. Groups + ungrouped stay selectable. groups==1 -> no nested layer
+# (default = lone group). off -> flat urltest+selector unchanged.
+#
+# The grouped branch is inline shell inside configure_outbound_handler (not its
+# own function), so we awk-extract that exact code region VERBATIM out of the
+# live bin (from the branch's `local grouping_json ...` decl through the final
+# grouped selector build) and wrap it in a driver function — the test exercises
+# the SHIPPED logic, not a copy. We seed $config with synthetic flag-tagged
+# shadowsocks outbounds (no real subscription data) so the generated config can
+# be fed to `sing-box check`. Tokens use the name:OK/FAIL convention; the driver
+# output is parsed in the CURRENT shell (no pipe) so the tokens GATE CI.
+# ─────────────────────────────────────────────────────────────────
+test_fastest_group() {
+    header "Fastest Cross-Group urltest (task-050)"
+
+    if ! command -v jq > /dev/null 2>&1; then
+        skip "jq not available"
+        return
+    fi
+
+    local bin="${NETSHIFT_SRC}/usr/bin/netshift"
+    local constants="${NETSHIFT_LIB_DIR}/constants.sh"
+    local manager="${NETSHIFT_LIB_DIR}/sing_box_config_manager.sh"
+    if [ ! -r "$bin" ] || [ ! -r "$constants" ] || [ ! -r "$manager" ]; then
+        skip "netshift bin / constants.sh / config_manager.sh not found"
+        return
+    fi
+
+    local work="/tmp/netshift-fastest-$$"
+    mkdir -p "$work"
+    local drv="$work/driver.sh"
+
+    cat > "$drv" << 'FGEOF'
+# Quiet logger (the grouped branch logs at info/debug/fatal; never let a fatal
+# log mask the real exit code — the branch calls `exit 1` itself on failure).
+log() { :; }
+echolog() { :; }
+nolog() { :; }
+
+# Real constant ($SB_SUBSCRIPTION_FASTEST_GROUP_TAG) + cm primitives.
+. "CONSTANTS_PATH"
+. "MANAGER_PATH"
+
+# Pull the shipped helpers VERBATIM out of the live bin so we test shipped code.
+eval "$(awk '/^sing_box_get_unique_outbound_tag\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+eval "$(awk '/^sing_box_build_subscription_groups\(\) \{/{p=1} p{print} p&&/^\}/{exit}' "BIN_PATH")"
+
+# Extract the WHOLE grouping if/else region VERBATIM (the grouped `then` branch
+# AND the flat `off` `else` branch) and wrap it as a function so we can drive
+# both modes against the SHIPPED code. The leading `if ...; then local ...`
+# line is valid inside this wrapper.
+_grouped_branch() {
+EXTRACT_GROUPED
+}
+
+# The off branch derives its urltest tag via get_outbound_tag_by_section; the
+# grouped branch derives only $selector_tag (which we set ourselves). Stub it
+# deterministically (synthetic, no real data).
+get_outbound_tag_by_section() { printf '%s-out' "$1"; }
+
+run_case() {
+    # $1 = group_mode, $2 = prefix_len, $3 = tags-json, $4 = base config (with
+    # the synthetic outbounds), $5 = selector tag. Echoes the resulting config.
+    group_mode="$1"
+    prefix_len="$2"
+    subscription_outbound_tags_json="$3"
+    config="$4"
+    selector_tag="$5"
+    section="syn"
+    urltest_testing_url="https://www.gstatic.com/generate_204"
+    urltest_check_interval="3m0s"
+    urltest_tolerance="50"
+    selector_outbounds=""
+    selector_default=""
+    _grouped_branch
+    printf '%s' "$config"
+}
+FGEOF
+
+    # Build the synthetic outbound set: two country groups (RU/DE flags) with two
+    # nodes each + one ungrouped node. Flags are regional-indicator pairs built
+    # by codepoint so NO real subscription identifiers appear anywhere.
+    local synth_json
+    synth_json="$(jq -cn '
+        def flag($a; $b): ([127462 + $a, 127462 + $b] | implode);
+        (flag(17; 20)) as $ru   # RU
+        | (flag(3; 4))  as $de  # DE
+        | {
+            outbounds: [
+                {type:"shadowsocks", tag:($ru + " N1"), server:"10.0.0.1", server_port:443, method:"aes-256-gcm", password:"p"},
+                {type:"shadowsocks", tag:($ru + " N2"), server:"10.0.0.2", server_port:443, method:"aes-256-gcm", password:"p"},
+                {type:"shadowsocks", tag:($de + " N1"), server:"10.0.0.3", server_port:443, method:"aes-256-gcm", password:"p"},
+                {type:"shadowsocks", tag:($de + " N2"), server:"10.0.0.4", server_port:443, method:"aes-256-gcm", password:"p"},
+                {type:"shadowsocks", tag:"plain-node",  server:"10.0.0.5", server_port:443, method:"aes-256-gcm", password:"p"},
+                {type:"direct", tag:"direct-out"}
+            ]
+        }')"
+    local tags_json
+    tags_json="$(printf '%s' "$synth_json" | jq -c '[.outbounds[] | select(.type=="shadowsocks") | .tag]')"
+
+    # Single-group set: only RU nodes (no DE, no ungrouped).
+    local synth1_json synth1_tags
+    synth1_json="$(jq -cn '
+        def flag($a; $b): ([127462 + $a, 127462 + $b] | implode);
+        (flag(17; 20)) as $ru
+        | {
+            outbounds: [
+                {type:"shadowsocks", tag:($ru + " N1"), server:"10.0.1.1", server_port:443, method:"aes-256-gcm", password:"p"},
+                {type:"shadowsocks", tag:($ru + " N2"), server:"10.0.1.2", server_port:443, method:"aes-256-gcm", password:"p"},
+                {type:"direct", tag:"direct-out"}
+            ]
+        }')"
+    synth1_tags="$(printf '%s' "$synth1_json" | jq -c '[.outbounds[] | select(.type=="shadowsocks") | .tag]')"
+
+    # Substitute the awk-extracted grouped-branch region into the driver. The
+    # region is plain shell statements; sed reads it from the live bin between
+    # the unique markers and writes it where EXTRACT_GROUPED sits.
+    local region="$work/region.sh"
+    # Capture from the `if [ "$group_mode" != "off" ]; then` opener through the
+    # off-branch's final selector build line and the immediately following `fi`
+    # that closes the if/else (q-flag stops after that fi).
+    awk '
+        /if \[ "\$group_mode" != "off" \]; then/{p=1}
+        p{print}
+        p && /"\$urltest_tag" "true"\)"/{seen_else_end=1; next}
+        seen_else_end && /^[[:space:]]*fi$/{exit}
+    ' "$bin" > "$region"
+    # Confirm the region captured BOTH branches: the fastest prepend (grouped),
+    # the cm urltest call, and the off-branch closing.
+    if grep -q 'SB_SUBSCRIPTION_FASTEST_GROUP_TAG' "$region" \
+        && grep -q 'sing_box_cm_add_urltest_outbound' "$region" \
+        && grep -q 'Create urltest + selector' "$region"; then
+        pass "fastest-region-extracted:OK"
+    else
+        fail "fastest-region-extracted:FAIL" "$(head -5 "$region" 2>/dev/null)"
+    fi
+
+    # Splice region into the driver in place of the EXTRACT_GROUPED placeholder
+    # (use an r-command via a temp because the region contains arbitrary chars).
+    {
+        sed '/EXTRACT_GROUPED/q' "$drv" | sed '$d'
+        cat "$region"
+        sed -n '/EXTRACT_GROUPED/,$p' "$drv" | sed '1d'
+    } > "$drv.spliced"
+    mv "$drv.spliced" "$drv"
+    sed -i "s|CONSTANTS_PATH|$constants|g;s|MANAGER_PATH|$manager|g;s|BIN_PATH|$bin|g" "$drv"
+
+    # ── >= 2 groups (country mode): nested Fastest urltest + selector default ──
+    local out2="$work/out2.json"
+    {
+        echo ". \"$drv\""
+        echo "run_case country 2 '$tags_json' '$synth_json' 'syn-out'"
+    } > "$work/run2.sh"
+    ash "$work/run2.sh" > "$out2" 2>/dev/null || true
+
+    # The deduped fastest tag (the constant; no collision in our synthetic set).
+    local fastest_expected ru_tag de_tag
+    fastest_expected="$(. "$constants"; printf '%s' "$SB_SUBSCRIPTION_FASTEST_GROUP_TAG")"
+    ru_tag="$(printf '%s' "$synth_json" | jq -r '.outbounds[0].tag' | sed 's/ N1$//') Fastest"
+    de_tag="$(printf '%s' "$synth_json" | jq -r '.outbounds[2].tag' | sed 's/ N1$//') Fastest"
+
+    # (a) Top-level urltest tagged the fastest tag whose outbounds are EXACTLY
+    #     the per-group urltest tags.
+    if jq -e --arg t "$fastest_expected" --arg g1 "$ru_tag" --arg g2 "$de_tag" '
+        ([.outbounds[] | select(.type=="urltest" and .tag==$t)]) as $f
+        | ($f | length) == 1
+        and ($f[0].outbounds == [$g1, $g2])
+    ' "$out2" > /dev/null 2>&1; then
+        pass "fastest-nested-urltest-members:OK"
+    else
+        fail "fastest-nested-urltest-members:FAIL" "$(jq -c '[.outbounds[]|select(.type=="urltest")|{tag,outbounds}]' "$out2" 2>/dev/null)"
+    fi
+
+    # (b) Main selector default == fastest tag, and outbounds ==
+    #     [fastest, group1, group2, ungrouped...].
+    if jq -e --arg t "$fastest_expected" --arg g1 "$ru_tag" --arg g2 "$de_tag" '
+        ([.outbounds[] | select(.type=="selector" and .tag=="syn-out")]) as $s
+        | ($s | length) == 1
+        and ($s[0].default == $t)
+        and ($s[0].outbounds == [$t, $g1, $g2, "plain-node"])
+    ' "$out2" > /dev/null 2>&1; then
+        pass "fastest-selector-default-membership:OK"
+    else
+        fail "fastest-selector-default-membership:FAIL" "$(jq -c '.outbounds[]|select(.type=="selector")|{tag,default,outbounds}' "$out2" 2>/dev/null)"
+    fi
+
+    # (c) sing-box check PASSES on the generated config WITH the nested urltest.
+    if command -v sing-box > /dev/null 2>&1; then
+        local chk2="$work/check2.json"
+        # Wrap the outbounds into a minimal full config sing-box can validate.
+        jq '{
+            log: {disabled:true},
+            dns: {servers: [], rules: [], final: "direct"},
+            inbounds: [{type:"direct", tag:"dns-in", listen:"127.0.0.42", listen_port:53}],
+            outbounds: .outbounds,
+            route: {rules: [], rule_set: [], final: "direct-out", auto_detect_interface: true}
+        }' "$out2" > "$chk2" 2>/dev/null
+        if sing-box -c "$chk2" check > /dev/null 2>&1; then
+            pass "fastest-singbox-check-passes:OK"
+        else
+            fail "fastest-singbox-check-passes:FAIL" "$(sing-box -c "$chk2" check 2>&1 | head -3)"
+        fi
+    else
+        skip "fastest-singbox-check-passes (sing-box not installed)"
+    fi
+
+    # (d) groups==1 -> NO redundant nested urltest; default = lone group.
+    local out1="$work/out1.json"
+    {
+        echo ". \"$drv\""
+        echo "run_case country 2 '$synth1_tags' '$synth1_json' 'syn1-out'"
+    } > "$work/run1.sh"
+    ash "$work/run1.sh" > "$out1" 2>/dev/null || true
+    local lone_group
+    lone_group="$(printf '%s' "$synth1_json" | jq -r '.outbounds[0].tag' | sed 's/ N1$//') Fastest"
+    if jq -e --arg t "$fastest_expected" --arg lone "$lone_group" '
+        ([.outbounds[] | select(.type=="urltest" and .tag==$t)] | length) == 0
+        and ([.outbounds[] | select(.type=="selector" and .tag=="syn1-out")][0].default == $lone)
+    ' "$out1" > /dev/null 2>&1; then
+        pass "fastest-single-group-no-nest:OK"
+    else
+        fail "fastest-single-group-no-nest:FAIL" "$(jq -c '[.outbounds[]|select(.type=="urltest" or .type=="selector")|{type,tag,default}]' "$out1" 2>/dev/null)"
+    fi
+
+    # (e) off mode unchanged (regression): flat urltest + selector, NO fastest
+    #     tag, selector default == the flat urltest tag (<section>-urltest-out).
+    local outoff="$work/outoff.json"
+    {
+        echo ". \"$drv\""
+        echo "run_case off 2 '$tags_json' '$synth_json' 'syn-out'"
+    } > "$work/runoff.sh"
+    ash "$work/runoff.sh" > "$outoff" 2>/dev/null || true
+    if jq -e --arg t "$fastest_expected" '
+        ([.outbounds[] | select(.type=="urltest" and .tag==$t)] | length) == 0
+        and ([.outbounds[] | select(.type=="urltest")] | length) == 1
+        and ([.outbounds[] | select(.type=="selector" and .tag=="syn-out")][0].default
+              == "syn-urltest-out")
+    ' "$outoff" > /dev/null 2>&1; then
+        pass "fastest-off-mode-unchanged:OK"
+    else
+        fail "fastest-off-mode-unchanged:FAIL" "$(jq -c '[.outbounds[]|select(.type=="urltest" or .type=="selector")|{type,tag,default}]' "$outoff" 2>/dev/null)"
+    fi
+
+    rm -rf "$work"
+}
+
+# ─────────────────────────────────────────────────────────────────
 # Test: Insecure subscription fetch flag (task-021b)
 #
 # Exercises download_subscription's 8th positional arg (insecure 0|1). A
@@ -6275,6 +6528,7 @@ main() {
             test_unsupported_skip
             test_diagnostics
             test_subscription
+            test_fastest_group
             test_insecure_fetch
             test_rejected_hash
             test_jobstate
@@ -6302,6 +6556,7 @@ main() {
         unsupported) test_unsupported_skip ;;
         diagnostics) test_diagnostics ;;
         subscription) test_subscription ;;
+        fastest)     test_fastest_group ;;
         insecure)    test_insecure_fetch ;;
         rejected)    test_rejected_hash ;;
         jobstate)    test_jobstate ;;
@@ -6321,7 +6576,7 @@ main() {
         sb)          test_sing_box_config ;;
         *)
             echo "Unknown test: $target"
-            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription insecure rejected jobstate selfheal dnsdetour suburlopt globalproxy stablecheck extcheck netshiftcheck latesttag ghredirect selfupdate backupguard"
+            echo "Available: all deps syntax config helpers jq cm sb nft nftv6 selmark isolation monfd unsupported diagnostics subscription fastest insecure rejected jobstate selfheal dnsdetour suburlopt globalproxy stablecheck extcheck netshiftcheck latesttag ghredirect selfupdate backupguard"
             exit 1
             ;;
     esac
