@@ -597,6 +597,109 @@ function subscription_keyword_name_passes(filter, name) {
     return false;
 }
 
+function utf8_codepoints(value) {
+    value = as_string(value);
+    let result = [];
+    let i = 0;
+    while (i < length(value)) {
+        let b = ord(substr(value, i, 1));
+        if (b < 0x80) {
+            push(result, b);
+            i += 1;
+        }
+        else if (b < 0xE0 && i + 1 < length(value)) {
+            let b2 = ord(substr(value, i + 1, 1));
+            push(result, ((b & 0x1F) << 6) | (b2 & 0x3F));
+            i += 2;
+        }
+        else if (b < 0xF0 && i + 2 < length(value)) {
+            let b2 = ord(substr(value, i + 1, 1));
+            let b3 = ord(substr(value, i + 2, 1));
+            push(result, ((b & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F));
+            i += 3;
+        }
+        else if (i + 3 < length(value)) {
+            let b2 = ord(substr(value, i + 1, 1));
+            let b3 = ord(substr(value, i + 2, 1));
+            let b4 = ord(substr(value, i + 3, 1));
+            push(result, ((b & 0x07) << 18) | ((b2 & 0x3F) << 12) | ((b3 & 0x3F) << 6) | (b4 & 0x3F));
+            i += 4;
+        }
+        else {
+            push(result, b);
+            i += 1;
+        }
+    }
+    return result;
+}
+
+function codepoints_to_utf8(codepoints) {
+    let result = "";
+    for (let code in codepoints) {
+        if (code < 0x80)
+            result += chr(code);
+        else if (code < 0x800)
+            result += chr(0xC0 | (code >> 6)) + chr(0x80 | (code & 0x3F));
+        else if (code < 0x10000)
+            result += chr(0xE0 | (code >> 12)) + chr(0x80 | ((code >> 6) & 0x3F)) + chr(0x80 | (code & 0x3F));
+        else
+            result += chr(0xF0 | (code >> 18)) + chr(0x80 | ((code >> 12) & 0x3F)) + chr(0x80 | ((code >> 6) & 0x3F)) + chr(0x80 | (code & 0x3F));
+    }
+    return result;
+}
+
+function regional_indicator_codepoint(code) {
+    return code >= 127462 && code <= 127487;
+}
+
+function subscription_group_key(name, mode, prefix_len) {
+    let codepoints = utf8_codepoints(name);
+    if (mode == "prefix") {
+        if (length(codepoints) == 0)
+            return "";
+        let take = prefix_len < length(codepoints) ? prefix_len : length(codepoints);
+        let slice = [];
+        for (let i = 0; i < take; i++)
+            push(slice, codepoints[i]);
+        return codepoints_to_utf8(slice);
+    }
+
+    if (length(codepoints) >= 2 &&
+        regional_indicator_codepoint(codepoints[0]) &&
+        regional_indicator_codepoint(codepoints[1]))
+        return codepoints_to_utf8([ codepoints[0], codepoints[1] ]);
+
+    return "";
+}
+
+function subscription_group_plan(section, node_tags, state) {
+    let mode = connections.subscription_group_mode(section);
+    if (mode == "off")
+        return null;
+
+    let prefix_len = connections.subscription_group_prefix_len(section);
+    let names = object_or_empty(object_or_empty(state.outboundMetadata).names);
+    let plan = {
+        order: [],
+        groups: {},
+        ungrouped: []
+    };
+    for (let tag in array_or_empty(node_tags)) {
+        let name = as_string(object_or_empty(names)[as_string(tag)]);
+        let key = subscription_group_key(name, mode, prefix_len);
+        if (key == "") {
+            push(plan.ungrouped, tag);
+            continue;
+        }
+        if (plan.groups[key] == null) {
+            plan.groups[key] = [];
+            push(plan.order, key);
+        }
+        push(plan.groups[key], tag);
+    }
+    return plan;
+}
+
 function add_subscription_reference(refs, value) {
     value = as_string(value);
     if (value != "")
@@ -1461,6 +1564,85 @@ function add_priority_group_outbound(config, section, group_id, urltest_candidat
     };
 }
 
+
+function add_auto_subscription_groups(config, section, node_tags, state) {
+    let plan = subscription_group_plan(section, node_tags, state);
+    if (plan == null)
+        return null;
+
+    let taken = reserved_runtime_tag_set(config.outbounds);
+    let group_tags = [];
+    let url = connections.urltest_testing_url(section, "urltest");
+    let interval = urltest_check_interval(section, "urltest");
+    let tolerance = int(connections.urltest_tolerance(section, "urltest"), 10);
+    let interrupt = connections.urltest_interrupt_exist_connections(section, "urltest");
+
+    for (let key in plan.order) {
+        let group_tag = unique_tag(key + " Fastest", taken);
+        taken[group_tag] = true;
+        let outbound = {
+            type: "urltest",
+            tag: group_tag,
+            outbounds: plan.groups[key],
+            url,
+            interval,
+            tolerance,
+            interrupt_exist_connections: interrupt
+        };
+        runtime_subscription.remember_outbound_metadata(state, group_tag, key, outbound);
+        runtime_subscription.remember_urltest_group_config(state, group_tag, {
+            displayName: key,
+            outbounds: plan.groups[key],
+            url,
+            interval,
+            tolerance,
+            idle_timeout: "",
+            interrupt_exist_connections: interrupt
+        });
+        push(config.outbounds, outbound);
+        push(group_tags, group_tag);
+    }
+
+    let fastest_tag = "";
+    if (length(group_tags) >= 2) {
+        fastest_tag = unique_tag("⚡ Fastest", taken);
+        taken[fastest_tag] = true;
+        let outbound = {
+            type: "urltest",
+            tag: fastest_tag,
+            outbounds: group_tags,
+            url,
+            interval,
+            tolerance,
+            interrupt_exist_connections: interrupt
+        };
+        runtime_subscription.remember_outbound_metadata(state, fastest_tag, fastest_tag, outbound);
+        runtime_subscription.remember_urltest_group_config(state, fastest_tag, {
+            displayName: fastest_tag,
+            outbounds: group_tags,
+            url,
+            interval,
+            tolerance,
+            idle_timeout: "",
+            interrupt_exist_connections: interrupt
+        });
+        push(config.outbounds, outbound);
+    }
+
+    let selector_outbounds = [];
+    if (fastest_tag != "")
+        push(selector_outbounds, fastest_tag);
+    for (let tag in group_tags)
+        push(selector_outbounds, tag);
+    for (let tag in plan.ungrouped)
+        push(selector_outbounds, tag);
+
+    return {
+        selector_outbounds,
+        selector_default: fastest_tag != "" ? fastest_tag : (group_tags[0] || plan.ungrouped[0])
+    };
+}
+
 function add_proxy_selector(config, section, selector_tags, urltest_candidate_tags, state) {
     let section_name = section[".name"];
     let selector_tag = outbound_tag(section_name);
@@ -1496,14 +1678,23 @@ function add_proxy_selector(config, section, selector_tags, urltest_candidate_ta
         push(priority_tags, priority.tag);
     }
 
-    selector_outbounds = dashboard_filtered_outbounds(section, selector_tags, state, group_outbounds);
-    selector_default = selector_outbounds[0];
+    let filtered_tags = dashboard_filtered_outbounds(section, selector_tags, state, group_outbounds);
+    let auto_groups = add_auto_subscription_groups(config, section, filtered_tags, state);
+    if (auto_groups != null) {
+        selector_outbounds = auto_groups.selector_outbounds;
+        selector_default = auto_groups.selector_default;
+    }
+    else {
+        selector_outbounds = filtered_tags;
+        selector_default = selector_outbounds[0];
+    }
     if (length(urltest_tags) > 0 || length(priority_tags) > 0) {
         for (let tag in urltest_tags)
             push(selector_outbounds, tag);
         for (let tag in priority_tags)
             push(selector_outbounds, tag);
-        selector_default = length(urltest_tags) > 0 ? urltest_tags[0] : priority_tags[0];
+        if (auto_groups == null)
+            selector_default = length(urltest_tags) > 0 ? urltest_tags[0] : priority_tags[0];
     }
 
     if (length(selector_outbounds) == 0)

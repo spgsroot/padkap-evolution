@@ -77,9 +77,9 @@ config settings 'settings'
 #        option show_dashboard_metadata '1'
 #        option prefix_nodes '0'
 #        #option node_prefix 'Provider'
-#        option include_urltest_groups '1'
-#        option hide_urltest_group_outbounds '1'
 #        option hide_detour_outbounds '1'
+#        #option subscription_group_mode 'off'
+#        #option subscription_group_prefix_len '2'
 
 #config urltest
 #        option section 'subscription_example'

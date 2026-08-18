@@ -1255,6 +1255,12 @@ function append_sing_box_rule_signature_body(body, section, sections) {
         body = signature_add_value(body, prefix + ".detect_server_country", normalize_detect_server_country_method(option(section, "detect_server_country", "flag_emoji")));
         body = signature_add_value(body, prefix + ".urltest_check_interval", section_urltest_check_interval(section));
         body = signature_add_value(body, prefix + ".urltest_tolerance", option(section, "urltest_tolerance", "50"));
+        body = signature_add_value(body, prefix + ".resolve_real_ip_for_routing", bool_option_value(section, "resolve_real_ip_for_routing", false));
+        body = signature_add_value(body, prefix + ".global_proxy", bool_option_value(section, "global_proxy", false));
+        body = signature_add_value(body, prefix + ".subscription_filter_include_keywords", option(section, "subscription_filter_include_keywords", ""));
+        body = signature_add_value(body, prefix + ".subscription_filter_exclude_keywords", option(section, "subscription_filter_exclude_keywords", ""));
+        body = signature_add_value(body, prefix + ".subscription_group_mode", option(section, "subscription_group_mode", "off"));
+        body = signature_add_value(body, prefix + ".subscription_group_prefix_len", option(section, "subscription_group_prefix_len", "2"));
         body = signature_add_value(body, prefix + ".urltest_testing_url", option(section, "urltest_testing_url", "https://www.gstatic.com/generate_204"));
         body = signature_add_value(body, prefix + ".urltest_filter_mode", option(section, "urltest_filter_mode", "disabled"));
         body = signature_add_value(body, prefix + ".urltest_exclude_countries", option(section, "urltest_exclude_countries", ""));
@@ -1266,7 +1272,6 @@ function append_sing_box_rule_signature_body(body, section, sections) {
         body = signature_add_value(body, prefix + ".subscription_update_interval", section_subscription_update_interval(section));
         body = signature_add_outbound_detour_body(body, section, prefix);
         body = signature_add_mixed_proxy_body(body, section, prefix);
-        body = signature_add_value(body, prefix + ".resolve_real_ip_for_routing", bool_option_value(section, "resolve_real_ip_for_routing", false));
     }
     else if (action == "byedpi") {
         body = signature_add_value(body, prefix + ".byedpi_index", sing_box_signature_enabled_action_index(sections, name, "byedpi"));

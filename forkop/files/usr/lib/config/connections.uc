@@ -736,6 +736,17 @@ function subscription_format_preference(section, value) {
     return result == "xray" || result == "singbox" ? result : "auto";
 }
 
+function subscription_group_mode(section) {
+    let mode = lc(option(section, "subscription_group_mode", "off"));
+    return mode == "country" || mode == "prefix" ? mode : "off";
+}
+
+function subscription_group_prefix_len(section) {
+    let value = option(section, "subscription_group_prefix_len", "2");
+    let number = int(value, 10);
+    return number >= 1 ? number : 2;
+}
+
 function urltest_check_interval(section, value) {
     let child = urltest_child(section, value);
     if (child != null)
@@ -1120,6 +1131,7 @@ return {
     dashboard_include_transports,
     dashboard_include_securities,
     dashboard_include_groups,
+    dashboard_exclude_groups,
     dashboard_exclude_countries,
     dashboard_exclude_outbounds,
     dashboard_exclude_regex,
@@ -1127,7 +1139,9 @@ return {
     dashboard_exclude_protocols,
     dashboard_exclude_transports,
     dashboard_exclude_securities,
-    dashboard_exclude_groups,
+    subscription_format_preference,
+    subscription_group_mode,
+    subscription_group_prefix_len,
     community_lists,
     rule_sets,
     rule_sets_with_subnets,
@@ -1138,7 +1152,6 @@ return {
     has_connection_sources,
     subscription_url_settings,
     subscription_insecure,
-    subscription_format_preference,
     interface_settings,
     urltest_settings,
     subscription_update_enabled,

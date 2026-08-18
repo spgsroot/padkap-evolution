@@ -632,6 +632,18 @@ flag_emoji
 3m
 [rule.proxy1.urltest_tolerance]
 75
+[rule.proxy1.resolve_real_ip_for_routing]
+1
+[rule.proxy1.global_proxy]
+0
+[rule.proxy1.subscription_filter_include_keywords]
+
+[rule.proxy1.subscription_filter_exclude_keywords]
+
+[rule.proxy1.subscription_group_mode]
+off
+[rule.proxy1.subscription_group_prefix_len]
+2
 [rule.proxy1.urltest_testing_url]
 https://www.gstatic.com/generate_204
 [rule.proxy1.urltest_filter_mode]
@@ -664,8 +676,6 @@ out1
 user
 [rule.proxy1.mixed_proxy_password]
 pass
-[rule.proxy1.resolve_real_ip_for_routing]
-1
 [rule.proxy1.domain]
 full.example,legacy.example
 [rule.proxy1.domain_suffix]
@@ -718,6 +728,18 @@ flag_emoji
 
 [rule.out1.urltest_tolerance]
 50
+[rule.out1.resolve_real_ip_for_routing]
+0
+[rule.out1.global_proxy]
+0
+[rule.out1.subscription_filter_include_keywords]
+
+[rule.out1.subscription_filter_exclude_keywords]
+
+[rule.out1.subscription_group_mode]
+off
+[rule.out1.subscription_group_prefix_len]
+2
 [rule.out1.urltest_testing_url]
 https://www.gstatic.com/generate_204
 [rule.out1.urltest_filter_mode]
@@ -739,8 +761,6 @@ disabled
 [rule.out1.outbound_detour_enabled]
 0
 [rule.out1.mixed_proxy_enabled]
-0
-[rule.out1.resolve_real_ip_for_routing]
 0
 [rule.out1.domain]
 
@@ -826,6 +846,18 @@ flag_emoji
 
 [rule.vpn1.urltest_tolerance]
 50
+[rule.vpn1.resolve_real_ip_for_routing]
+1
+[rule.vpn1.global_proxy]
+0
+[rule.vpn1.subscription_filter_include_keywords]
+
+[rule.vpn1.subscription_filter_exclude_keywords]
+
+[rule.vpn1.subscription_group_mode]
+off
+[rule.vpn1.subscription_group_prefix_len]
+2
 [rule.vpn1.urltest_testing_url]
 https://www.gstatic.com/generate_204
 [rule.vpn1.urltest_filter_mode]
@@ -848,8 +880,6 @@ disabled
 0
 [rule.vpn1.mixed_proxy_enabled]
 0
-[rule.vpn1.resolve_real_ip_for_routing]
-1
 [rule.vpn1.domain]
 
 [rule.vpn1.domain_suffix]

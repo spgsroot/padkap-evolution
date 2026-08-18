@@ -7333,6 +7333,38 @@ function createSectionContent(section) {
 
   o = section.taboption(
     "settings",
+    form.ListValue,
+    "subscription_group_mode",
+    _("Subscription grouping"),
+    _(
+      "Group subscription nodes by country flag or name prefix into URLTest groups with an automatic fastest-group selector",
+    ),
+  );
+  o.value("off", _("Off"));
+  o.value("country", _("By country"));
+  o.value("prefix", _("By name prefix"));
+  o.default = "off";
+  o.rmempty = false;
+  o.depends("action", "connection");
+  o.modalonly = true;
+
+  o = section.taboption(
+    "settings",
+    form.Value,
+    "subscription_group_prefix_len",
+    _("Group prefix length"),
+    _("Number of first name characters used as the group key"),
+  );
+  o.depends("action", "connection");
+  o.depends("subscription_group_mode", "prefix");
+  o.default = "2";
+  o.rmempty = false;
+  o.modalonly = true;
+  o.datatype = "uinteger";
+  o.placeholder = "2";
+
+  o = section.taboption(
+    "settings",
     InterfaceSettingsDynamicList,
     "interfaces",
     _("Network Interface"),

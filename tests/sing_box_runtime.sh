@@ -498,6 +498,124 @@ fi
 grep -Fq 'keyword filter removed all nodes' "$WORK_DIR/keyword-filter-empty.stderr" ||
   fail "generator must explain the emptied keyword filter"
 
+cat >"$WORK_DIR/subscriptions/auto_group-subscription-1.json" <<'JSON'
+{
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "de-1",
+      "remark": "🇩🇪 Frankfurt 01",
+      "server": "127.0.0.1",
+      "server_port": 1080
+    },
+    {
+      "type": "socks",
+      "tag": "de-2",
+      "remark": "🇩🇪 Berlin",
+      "server": "127.0.0.2",
+      "server_port": 1080
+    },
+    {
+      "type": "socks",
+      "tag": "us-1",
+      "remark": "🇺🇸 New York",
+      "server": "127.0.0.3",
+      "server_port": 1080
+    },
+    {
+      "type": "socks",
+      "tag": "us-2",
+      "remark": "🇺🇸 Los Angeles",
+      "server": "127.0.0.4",
+      "server_port": 1080
+    },
+    {
+      "type": "socks",
+      "tag": "bare",
+      "remark": "No Flag Node",
+      "server": "127.0.0.5",
+      "server_port": 1080
+    }
+  ]
+}
+JSON
+printf '%s' 'https://example.com/auto-group.json' >"$WORK_DIR/subscriptions/auto_group-subscription-1.url"
+printf '%s' 'Happ' >"$WORK_DIR/subscriptions/auto_group-subscription-1.user_agent"
+cat >"$WORK_DIR/auto-group-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "auto_group",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "subscription_urls": [ "https://example.com/auto-group.json" ],
+      "subscription_url_settings": "{\"https://example.com/auto-group.json\":{\"user_agent\":\"Happ\"}}",
+      "subscription_group_mode": "country",
+      "domain_suffix": [ "auto-group.example" ]
+    }
+  ]
+}
+JSON
+generate_config_with_subscription_cache \
+  "$WORK_DIR/auto-group-fixture.json" "$WORK_DIR/auto-group.json"
+grep -Fq '"🇩🇪 Fastest"' "$WORK_DIR/auto-group.json" ||
+  fail "country grouping must create per-flag URLTest groups"
+grep -Fq '"🇺🇸 Fastest"' "$WORK_DIR/auto-group.json" ||
+  fail "country grouping must group every flagged node"
+grep -Fq '"outbounds": [ "⚡ Fastest", "🇩🇪 Fastest", "🇺🇸 Fastest", "bare" ]' "$WORK_DIR/auto-group.json" ||
+  fail "selector must contain group tags and ungrouped nodes only"
+grep -Fq '"default": "⚡ Fastest"' "$WORK_DIR/auto-group.json" ||
+  fail "fastest-over-groups URLTest must be the selector default"
+grep -Fq '"⚡ Fastest"' "$WORK_DIR/auto-group.json" ||
+  fail "multiple groups must create the fastest-over-groups URLTest"
+grep -Fq '"bare"' "$WORK_DIR/auto-group.json" ||
+  fail "unflagged nodes must stay ungrouped in the selector"
+
+cat >"$WORK_DIR/auto-prefix-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "auto_prefix",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "selector_proxy_links": [
+        "socks5://user@127.0.0.1:1080#DE-1",
+        "socks5://user@127.0.0.2:1080#DE-2",
+        "socks5://user@127.0.0.3:1080#US-1",
+        "socks5://user@127.0.0.4:1080#US-2"
+      ],
+      "subscription_group_mode": "prefix",
+      "subscription_group_prefix_len": "2",
+      "domain_suffix": [ "auto-prefix.example" ]
+    }
+  ]
+}
+JSON
+generate_config_with_subscription_cache \
+  "$WORK_DIR/auto-prefix-fixture.json" "$WORK_DIR/auto-prefix.json"
+grep -Fq '"DE Fastest"' "$WORK_DIR/auto-prefix.json" ||
+  fail "prefix grouping must create per-prefix URLTest groups"
+grep -Fq '"US Fastest"' "$WORK_DIR/auto-prefix.json" ||
+  fail "prefix grouping must group every prefixed node"
+grep -Fq '"⚡ Fastest"' "$WORK_DIR/auto-prefix.json" ||
+  fail "prefix grouping must create the fastest-over-groups URLTest"
+
 cat >"$WORK_DIR/disabled-updates-fixture.json" <<'JSON'
 {
   "settings": {
