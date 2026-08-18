@@ -230,6 +230,109 @@ grep -Fq '"example.org"' "$WORK_DIR/generated-from-uci.json" ||
 grep -Fq '"uci_proxy-out"' "$WORK_DIR/generated-from-uci.json" ||
   fail "singbox/generator.uc must read section names from core.uci"
 
+cat >"$WORK_DIR/global-proxy-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "everything",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "global_proxy": "1",
+      "outbound_jsons": [ "{\"type\":\"direct\"}" ]
+    },
+    {
+      ".name": "partial",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "domain_suffix": [ "example.org" ],
+      "outbound_jsons": [ "{\"type\":\"direct\"}" ]
+    }
+  ]
+}
+JSON
+if ! ucode -L "$FORKOP_LIB" "$SINGBOX_GENERATOR_UC" generate-config-fixture \
+  "$WORK_DIR/global-proxy-fixture.json" "$WORK_DIR/global-proxy.json" "127.0.0.1" "0"; then
+  fail "generator must accept a global proxy section"
+fi
+grep -Fq '"final": "everything-out"' "$WORK_DIR/global-proxy.json" ||
+  fail "generator must use the global proxy section outbound as the route final"
+grep -Fq '"example.org"' "$WORK_DIR/global-proxy.json" ||
+  fail "global proxy must keep other sections' destination-selective route rules"
+
+cat >"$WORK_DIR/global-proxy-bad-action-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "bypass_only",
+      ".type": "section",
+      "enabled": "1",
+      "action": "bypass",
+      "global_proxy": "1"
+    }
+  ]
+}
+JSON
+if ucode -L "$FORKOP_LIB" "$SINGBOX_GENERATOR_UC" generate-config-fixture \
+  "$WORK_DIR/global-proxy-bad-action-fixture.json" "$WORK_DIR/global-proxy-bad-action.json" "127.0.0.1" "0" \
+  >"$WORK_DIR/global-proxy-bad-action.stdout" 2>"$WORK_DIR/global-proxy-bad-action.stderr"; then
+  fail "generator must reject global_proxy on a non-connection action"
+fi
+grep -Fq 'global_proxy' "$WORK_DIR/global-proxy-bad-action.stderr" ||
+  fail "generator must explain the global_proxy action restriction"
+
+cat >"$WORK_DIR/global-proxy-two-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "first",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "global_proxy": "1",
+      "outbound_jsons": [ "{\"type\":\"direct\"}" ]
+    },
+    {
+      ".name": "second",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "global_proxy": "1",
+      "outbound_jsons": [ "{\"type\":\"direct\"}" ]
+    }
+  ]
+}
+JSON
+if ucode -L "$FORKOP_LIB" "$SINGBOX_GENERATOR_UC" generate-config-fixture \
+  "$WORK_DIR/global-proxy-two-fixture.json" "$WORK_DIR/global-proxy-two.json" "127.0.0.1" "0" \
+  >"$WORK_DIR/global-proxy-two.stdout" 2>"$WORK_DIR/global-proxy-two.stderr"; then
+  fail "generator must reject multiple global proxy sections"
+fi
+grep -Fq 'global_proxy' "$WORK_DIR/global-proxy-two.stderr" ||
+  fail "generator must explain the single global proxy restriction"
+
 cat >"$WORK_DIR/disabled-updates-fixture.json" <<'JSON'
 {
   "settings": {

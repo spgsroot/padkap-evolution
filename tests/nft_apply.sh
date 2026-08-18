@@ -258,6 +258,27 @@ assert_contains "$NFT_LOG" $'nft\tadd\telement\tinet\tForkopTable\tforkop_interf
 assert_contains "$NFT_LOG" $'nft\tadd\telement\tinet\tForkopTable\tforkop_interfaces\t{ tun0 }' "runtime base from UCI tun0 interface"
 assert_contains "$NFT_LOG" $'nft\tinsert\trule\tinet\tForkopTable\tmangle\tudp\tdport\t123\treturn' "runtime base from UCI ntp exclusion"
 
+cat >"$WORK_DIR/runtime-base-global-proxy.state" <<'EOF_UCI'
+forkop.settings=settings
+forkop.settings.source_network_interfaces=br-lan
+forkop.settings.exclude_ntp=0
+forkop.global=section
+forkop.global.enabled=1
+forkop.global.action=connection
+forkop.global.global_proxy=1
+EOF_UCI
+: > "$NFT_LOG"
+FORKOP_UCI_STATE_FILE="$WORK_DIR/runtime-base-global-proxy.state" \
+  nft_ucode nft-create-runtime-base-from-uci ForkopTable localv4 forkop_subnets forkop_ports forkop_ip_ports forkop_interfaces 0x00100000 0x00200000 198.18.0.0/15 1602
+assert_contains "$NFT_LOG" $'nft\tadd\trule\tinet\tForkopTable\tmangle\tiifname\t@forkop_interfaces\tmeta\tl4proto\ttcp\tmeta\tmark\tset\t0x00100000\tcounter' "global proxy mark-all tcp"
+assert_contains "$NFT_LOG" $'nft\tadd\trule\tinet\tForkopTable\tmangle\tiifname\t@forkop_interfaces\tmeta\tl4proto\tudp\tmeta\tmark\tset\t0x00100000\tcounter' "global proxy mark-all udp"
+if grep -Fq $'ip\tdaddr\t@forkop_subnets' "$NFT_LOG"; then
+  fail "global proxy must replace destination-selective subnet marking"
+fi
+if grep -Fq $'ip\tdaddr\t198.18.0.0/15' "$NFT_LOG"; then
+  fail "global proxy must replace destination-selective FakeIP marking"
+fi
+
 : > "$NFT_LOG"
 nft_ucode nft-create-runtime-output-rules ForkopTable localv4 forkop_subnets forkop_ports forkop_ip_ports 0x00100000 198.18.0.0/15
 assert_contains "$NFT_LOG" $'nft\tadd\trule\tinet\tForkopTable\tmangle_output\tip\tdaddr\t@forkop_subnets\tmeta\tl4proto\ttcp\tmeta\tmark\tset\t0x00100000\tcounter' "runtime output common tcp"
@@ -663,6 +684,8 @@ br-lan tun0
 1
 [rule.text_rule.action]
 bypass
+[rule.text_rule.global_proxy]
+0
 [rule.text_rule.ip_cidr]
 198.51.100.1,203.0.113.0/24
 [rule.text_rule.source_ip_cidr]
@@ -683,6 +706,8 @@ https://example.com/subnets.lst
 https://example.com/mixed.lst
 [rule.default_enabled.action]
 proxy
+[rule.default_enabled.global_proxy]
+0
 [rule.default_enabled.ip_cidr]
 10.0.0.0/8,192.0.2.1
 [rule.default_enabled.source_ip_cidr]
@@ -733,6 +758,8 @@ br-lan tun0
 1
 [rule.enabled.action]
 bypass
+[rule.enabled.global_proxy]
+0
 [rule.enabled.ip_cidr]
 10.0.0.0/8,192.0.2.1
 [rule.enabled.source_ip_cidr]

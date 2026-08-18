@@ -2959,6 +2959,23 @@ function section_by_name(sections, name) {
     return null;
 }
 
+function global_proxy_section(sections) {
+    let global_sections = [];
+    for (let section in sections) {
+        if (!bool_option(section, "global_proxy", false))
+            continue;
+
+        let action = option(section, "action", "");
+        if (!connections.is_connections_action(action))
+            runtime_generate_unsupported("global_proxy is set on section '" + as_string(section[".name"]) + "' with unsupported action '" + action + "'; global proxy requires a Connection action");
+        push(global_sections, section);
+    }
+    if (length(global_sections) > 1)
+        runtime_generate_unsupported("multiple sections have global_proxy enabled; only one global proxy section is allowed");
+
+    return length(global_sections) == 1 ? global_sections[0] : null;
+}
+
 function add_server_routes(config, servers, sections) {
     for (let server in servers) {
         runtime_servers.add_sniff_rule(config, server);
@@ -3018,7 +3035,6 @@ function generate_config(output_path, service_address, mwan3_active, supports_xh
     let servers = enabled_servers();
     if (length(sections) == 0 && length(servers) == 0 && trim(as_string(deferred_sections)) == "")
         runtime_generate_unsupported("no enabled sections");
-
     let source_aware_dns = source_aware_dns_sources(sections);
     let config = base_config(settings, service_address, {
         mwan3_active: cli_bool(mwan3_active),
@@ -3036,6 +3052,9 @@ function generate_config(output_path, service_address, mwan3_active, supports_xh
         add_route_for_section(config, section);
     add_source_aware_dns_fallback(config, source_aware_dns);
     add_server_routes(config, servers, sections);
+    let global_section = global_proxy_section(sections);
+    if (global_section != null)
+        config.route.final = outbound_tag(global_section[".name"]);
     add_service_mixed_proxy(config, settings, sections);
     for (let section in sections)
         add_mixed_proxy_for_section(config, section, service_address);

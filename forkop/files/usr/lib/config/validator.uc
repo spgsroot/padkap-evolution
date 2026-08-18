@@ -1414,6 +1414,8 @@ function validate_rule(section, sections, context) {
         fail_validation("Enabled rule '" + name + "' has no action. Aborted.");
     if (!rule_action_supported(action))
         fail_validation("Enabled rule '" + name + "' uses unsupported action '" + action + "'. Aborted.");
+    if (bool_option(section, "global_proxy", false) && !connections.is_connections_action(action))
+        fail_validation("Enabled rule '" + name + "' uses global_proxy with unsupported action '" + action + "'. Global proxy requires a Connection action. Aborted.");
 
     if (action != "dns")
         for (let value in list_option(section, "ports"))
@@ -1728,8 +1730,17 @@ function validate_runtime_config(context) {
 
     for (let section in sections)
         validate_rule(section, sections, context);
-}
 
+    let global_proxy_sections = [];
+    for (let section in sections) {
+        if (!section_enabled(section))
+            continue;
+        if (bool_option(section, "global_proxy", false))
+            push(global_proxy_sections, section_name(section));
+    }
+    if (length(global_proxy_sections) > 1)
+        fail_validation("Multiple enabled rules have global_proxy enabled (" + join(", ", global_proxy_sections) + "). Only one global proxy section is allowed. Aborted.");
+}
 function context_from_runtime() {
     let constants = object_or_empty(runtime_constants());
 

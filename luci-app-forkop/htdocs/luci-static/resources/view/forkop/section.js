@@ -7671,6 +7671,20 @@ function createSectionContent(section) {
     return getRuleResolvedAction(section_id) === "byedpi" ? "1" : "0";
   };
 
+  o = section.taboption(
+    "settings",
+    form.Flag,
+    "global_proxy",
+    _("Global proxy"),
+    _(
+      "Send ALL traffic through this rule's outbound instead of only the matched destinations.",
+    ),
+  );
+  o.default = "0";
+  o.rmempty = false;
+  o.depends("action", "connection");
+  o.modalonly = true;
+
   addTextConditionField(section, {
     key: "domain_suffix",
     optionName: "domain",
