@@ -7362,6 +7362,33 @@ function createSectionContent(section) {
   o.modalonly = true;
   o.datatype = "uinteger";
   o.placeholder = "2";
+  o = section.taboption(
+    "settings",
+    form.TextValue,
+    "selector_proxy_links_text",
+    _("Connection links (text)"),
+    _(
+      "Paste proxy links one per line; they are added to the connection list",
+    ),
+  );
+  o.depends("action", "connection");
+  o.rmempty = true;
+  o.modalonly = true;
+  o.rows = 5;
+
+  o = section.taboption(
+    "settings",
+    form.TextValue,
+    "urltest_proxy_links_text",
+    _("URLTest links (text)"),
+    _(
+      "Paste proxy links one per line; they form a URLTest group with automatic fastest selection",
+    ),
+  );
+  o.depends("action", "connection");
+  o.rmempty = true;
+  o.modalonly = true;
+  o.rows = 5;
 
   o = section.taboption(
     "settings",

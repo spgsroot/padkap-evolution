@@ -644,6 +644,8 @@ flag_emoji
 off
 [rule.proxy1.subscription_group_prefix_len]
 2
+[rule.proxy1.urltest_proxy_links_text]
+
 [rule.proxy1.urltest_testing_url]
 https://www.gstatic.com/generate_204
 [rule.proxy1.urltest_filter_mode]
@@ -740,6 +742,8 @@ flag_emoji
 off
 [rule.out1.subscription_group_prefix_len]
 2
+[rule.out1.urltest_proxy_links_text]
+
 [rule.out1.urltest_testing_url]
 https://www.gstatic.com/generate_204
 [rule.out1.urltest_filter_mode]
@@ -858,6 +862,8 @@ flag_emoji
 off
 [rule.vpn1.subscription_group_prefix_len]
 2
+[rule.vpn1.urltest_proxy_links_text]
+
 [rule.vpn1.urltest_testing_url]
 https://www.gstatic.com/generate_204
 [rule.vpn1.urltest_filter_mode]

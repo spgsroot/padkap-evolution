@@ -309,8 +309,34 @@ function action(section) {
     return normalize_action(option(section, "action", ""));
 }
 
+function text_links_value(section, key) {
+    let value = raw_option(section, key);
+    if (value == null)
+        return [];
+    if (type(value) == "array")
+        return value;
+
+    let result = [];
+    for (let line in split(replace(as_string(value), /\r/g, ""), /\n/))
+        for (let link in split(line, /[ \t]+/)) {
+            link = trim(as_string(link));
+            if (link != "")
+                push(result, link);
+        }
+    return result;
+}
+
 function connection_urls(section) {
-    return whitespace_list_value(section, "selector_proxy_links");
+    let result = [];
+    for (let link in whitespace_list_value(section, "selector_proxy_links"))
+        push(result, link);
+    for (let link in text_links_value(section, "selector_proxy_links_text"))
+        push(result, link);
+    return result;
+}
+
+function urltest_text_links(section) {
+    return text_links_value(section, "urltest_proxy_links_text");
 }
 
 function subscription_urls(section) {
@@ -1117,6 +1143,7 @@ return {
     normalize_action,
     action,
     connection_urls,
+    urltest_text_links,
     subscription_urls,
     interfaces,
     outbound_jsons,

@@ -1261,6 +1261,7 @@ function append_sing_box_rule_signature_body(body, section, sections) {
         body = signature_add_value(body, prefix + ".subscription_filter_exclude_keywords", option(section, "subscription_filter_exclude_keywords", ""));
         body = signature_add_value(body, prefix + ".subscription_group_mode", option(section, "subscription_group_mode", "off"));
         body = signature_add_value(body, prefix + ".subscription_group_prefix_len", option(section, "subscription_group_prefix_len", "2"));
+        body = signature_add_value(body, prefix + ".urltest_proxy_links_text", option(section, "urltest_proxy_links_text", ""));
         body = signature_add_value(body, prefix + ".urltest_testing_url", option(section, "urltest_testing_url", "https://www.gstatic.com/generate_204"));
         body = signature_add_value(body, prefix + ".urltest_filter_mode", option(section, "urltest_filter_mode", "disabled"));
         body = signature_add_value(body, prefix + ".urltest_exclude_countries", option(section, "urltest_exclude_countries", ""));

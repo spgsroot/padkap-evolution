@@ -1643,7 +1643,7 @@ function add_auto_subscription_groups(config, section, node_tags, state) {
     };
 }
 
-function add_proxy_selector(config, section, selector_tags, urltest_candidate_tags, state) {
+function add_proxy_selector(config, section, selector_tags, urltest_candidate_tags, state, text_urltest_tag) {
     let section_name = section[".name"];
     let selector_tag = outbound_tag(section_name);
     let selector_outbounds = selector_tags;
@@ -1664,6 +1664,9 @@ function add_proxy_selector(config, section, selector_tags, urltest_candidate_ta
 
         push(urltest_tags, urltest.tag);
     }
+
+    if (as_string(text_urltest_tag) != "" && !string_array_contains(urltest_tags, as_string(text_urltest_tag)))
+        push(urltest_tags, text_urltest_tag);
 
     for (let group_id in connections.priority_groups(section)) {
         let priority = add_priority_group_outbound(config, section, group_id, urltest_candidate_tags, state);
@@ -2309,6 +2312,60 @@ function connection_item_tag(section_name, kind, item_index) {
     return outbound_tag(section_name + "-" + as_string(kind) + "-" + item_index);
 }
 
+
+function add_connection_text_urltest(config, state, section, taken, selector_tags, urltest_candidate_tags, index_offset) {
+    let section_name = section[".name"];
+    if (string_array_contains(connections.urltests(section), "urltest"))
+        return "";
+
+    let text_links = connections.urltest_text_links(section);
+    if (length(text_links) == 0)
+        return "";
+
+    let text_tags = [];
+    for (let i = 0; i < length(text_links); i++)
+        add_manual_proxy_link(
+            config,
+            state,
+            section_name,
+            int(index_offset || 0) + i + 1,
+            text_links[i],
+            taken,
+            selector_tags,
+            text_tags
+        );
+
+    if (length(text_tags) == 0)
+        return "";
+
+    let urltest_tag = urltest_outbound_tag(section_name, "urltest");
+    let url = connections.urltest_testing_url(section, "urltest");
+    let interval = urltest_check_interval(section, "urltest");
+    let tolerance = int(connections.urltest_tolerance(section, "urltest"), 10);
+    let interrupt = connections.urltest_interrupt_exist_connections(section, "urltest");
+    let outbound = {
+        type: "urltest",
+        tag: urltest_tag,
+        outbounds: text_tags,
+        url,
+        interval,
+        tolerance,
+        interrupt_exist_connections: interrupt
+    };
+    runtime_subscription.remember_outbound_metadata(state, urltest_tag, "Fastest", outbound);
+    runtime_subscription.remember_urltest_group_config(state, urltest_tag, {
+        displayName: "Fastest",
+        outbounds: text_tags,
+        url,
+        interval,
+        tolerance,
+        idle_timeout: "",
+        interrupt_exist_connections: interrupt
+    });
+    push(config.outbounds, outbound);
+    return urltest_tag;
+}
+
 function add_connection_manual_links(config, state, section, taken, selector_tags, urltest_candidate_tags) {
     let section_name = section[".name"];
     let manual_links = connections.connection_urls(section);
@@ -2483,7 +2540,9 @@ function add_connections_outbound(config, section, taken) {
     let state = runtime_subscription.new_section_state(section_name);
     let cascade_start = length(array_or_empty(config.outbounds));
 
+    let manual_count = length(connections.connection_urls(section));
     add_connection_manual_links(config, state, section, taken, selector_tags, urltest_candidate_tags);
+    let text_urltest_tag = add_connection_text_urltest(config, state, section, taken, selector_tags, urltest_candidate_tags, manual_count);
     add_connection_subscriptions(config, state, section, taken, selector_tags, urltest_candidate_tags);
     // Apply before interface and JSON items are added: those source kinds are intentionally excluded.
     apply_section_detour_to_connection_outbounds(
@@ -2509,7 +2568,7 @@ function add_connections_outbound(config, section, taken) {
         state.outboundMetadata.names[runtime_constants.DIRECT_OUTBOUND_TAG] = "Direct";
 
     state.urltestCandidateTags = unique_string_array(urltest_candidate_tags);
-    add_proxy_selector(config, section, selector_tags, urltest_candidate_tags, state);
+    add_proxy_selector(config, section, selector_tags, urltest_candidate_tags, state, text_urltest_tag);
     if (!atomic_write_json_file(runtime_subscription.section_cache_path(section_name), state))
         runtime_generate_unsupported("failed to write section cache for " + section_name);
 }

@@ -43,7 +43,10 @@ config settings 'settings'
 #        option enabled '1'
 #        option action 'connection'
 #        list selector_proxy_links 'vless://example'
-#        list community_lists 'russia_inside'
+#        #option selector_proxy_links_text 'vless://node-1
+#vless://node-2'
+#        #option urltest_proxy_links_text 'vless://node-1
+#vless://node-2'
 #        list rule_set 'https://example.com/rules.srs'
 #        list rule_set_with_subnets 'https://example.com/rules-with-subnets.json'
 #        option dashboard_filter_mode 'disabled'

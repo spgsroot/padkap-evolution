@@ -616,6 +616,39 @@ grep -Fq '"US Fastest"' "$WORK_DIR/auto-prefix.json" ||
 grep -Fq '"⚡ Fastest"' "$WORK_DIR/auto-prefix.json" ||
   fail "prefix grouping must create the fastest-over-groups URLTest"
 
+cat >"$WORK_DIR/text-links-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "text_links",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "selector_proxy_links_text": "socks5://user@127.0.0.1:1080#Plain-1\nsocks5://user@127.0.0.2:1080#Plain-2",
+      "urltest_proxy_links_text": "socks5://user@127.0.0.3:1080#Fast-1\nsocks5://user@127.0.0.4:1080#Fast-2",
+      "domain_suffix": [ "text-links.example" ]
+    }
+  ]
+}
+JSON
+generate_config_with_subscription_cache \
+  "$WORK_DIR/text-links-fixture.json" "$WORK_DIR/text-links.json"
+grep -Fq '"tag": "text_links-1-out"' "$WORK_DIR/text-links.json" ||
+  fail "selector text links must create member outbounds"
+grep -Fq '"tag": "text_links-4-out"' "$WORK_DIR/text-links.json" ||
+  fail "urltest text links must create member outbounds"
+grep -Fq '"outbounds": [ "text_links-3-out", "text_links-4-out" ]' "$WORK_DIR/text-links.json" ||
+  fail "urltest text links must create the URLTest group"
+grep -Fq '"default": "text_links-urltest-out"' "$WORK_DIR/text-links.json" ||
+  fail "URLTest text group must be the selector default"
+
 cat >"$WORK_DIR/disabled-updates-fixture.json" <<'JSON'
 {
   "settings": {
