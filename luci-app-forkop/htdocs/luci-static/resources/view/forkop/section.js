@@ -2041,6 +2041,7 @@ function subscriptionUrlSettingsKeys() {
     "hide_urltest_group_outbounds",
     "hide_detour_outbounds",
     "subscription_insecure",
+    "subscription_format_preference",
   ];
 }
 
@@ -2061,6 +2062,7 @@ function defaultSubscriptionUrlSettings() {
     hide_urltest_group_outbounds: "1",
     hide_detour_outbounds: "1",
     subscription_insecure: "0",
+    subscription_format_preference: "auto",
   };
 }
 
@@ -2430,6 +2432,20 @@ function addSubscriptionUrlItemOptions(itemSection, options = {}) {
   );
   o.default = "0";
   o.rmempty = false;
+
+  o = itemSection.option(
+    form.ListValue,
+    "subscription_format_preference",
+    _("Preferred subscription format"),
+    _(
+      "Try Xray JSON client profiles first (auto keeps the sing-box client first)",
+    ),
+  );
+  o.value("auto", _("Auto"));
+  o.value("xray", _("Xray JSON"));
+  o.value("singbox", _("Sing-box"));
+  o.rmempty = false;
+}
 
 function addInterfaceItemOptions(itemSection) {
   let o = itemSection.option(

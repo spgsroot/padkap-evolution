@@ -727,6 +727,15 @@ function subscription_insecure(section, value) {
     return item_bool(section, "subscription_url_settings", value, "subscription_insecure", false);
 }
 
+function subscription_format_preference(section, value) {
+    let child = child_item_by_value(section, "subscription_url", "url", value);
+    let result = child != null
+        ? child_option(child, "subscription_format_preference", "auto")
+        : item_option(section, "subscription_url_settings", value, "subscription_format_preference", "auto");
+    result = as_string(result);
+    return result == "xray" || result == "singbox" ? result : "auto";
+}
+
 function urltest_check_interval(section, value) {
     let child = urltest_child(section, value);
     if (child != null)
@@ -1128,6 +1137,8 @@ return {
     rule_sets_with_subnets_value,
     has_connection_sources,
     subscription_url_settings,
+    subscription_insecure,
+    subscription_format_preference,
     interface_settings,
     urltest_settings,
     subscription_update_enabled,
@@ -1143,7 +1154,6 @@ return {
     subscription_user_agent,
     subscription_hwid,
     subscription_download_section,
-    subscription_insecure,
     interface_domain_resolver_enabled,
     interface_domain_resolver_dns_type,
     interface_domain_resolver_dns_server,

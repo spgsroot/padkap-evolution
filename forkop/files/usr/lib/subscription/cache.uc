@@ -432,9 +432,16 @@ let auto_user_agent_profiles = [
     "Mihomo",
     "Clash.Meta"
 ];
+let xray_user_agent_candidates = [
+    "Happ/1.0.0",
+    "v2rayN/7.0.0",
+    "v2rayNG/1.9.0"
+];
 
 let auto_user_agents = {};
 for (let profile in auto_user_agent_profiles)
+    auto_user_agents[profile] = true;
+for (let profile in xray_user_agent_candidates)
     auto_user_agents[profile] = true;
 
 function user_agent_supported(user_agent, default_user_agent) {
@@ -971,7 +978,7 @@ function append_user_agent_candidate(result, seen, candidate, default_user_agent
     push(result, candidate);
 }
 
-function write_user_agent_candidates(path, configured_user_agent, preferred_user_agent, default_user_agent) {
+function write_user_agent_candidates(path, configured_user_agent, preferred_user_agent, default_user_agent, format_preference) {
     path = as_string(path);
     configured_user_agent = as_string(configured_user_agent);
     preferred_user_agent = as_string(preferred_user_agent);
@@ -985,9 +992,20 @@ function write_user_agent_candidates(path, configured_user_agent, preferred_user
 
     let result = [];
     let seen = {};
-    let candidates = [ default_user_agent, preferred_user_agent ];
-    for (let profile in auto_user_agent_profiles)
-        push(candidates, profile);
+    let candidates = [];
+    if (as_string(format_preference) == "xray") {
+        for (let candidate in xray_user_agent_candidates)
+            push(candidates, candidate);
+        push(candidates, default_user_agent);
+        push(candidates, preferred_user_agent);
+        for (let profile in auto_user_agent_profiles)
+            push(candidates, profile);
+    }
+    else {
+        candidates = [ default_user_agent, preferred_user_agent ];
+        for (let profile in auto_user_agent_profiles)
+            push(candidates, profile);
+    }
 
     for (let candidate in candidates)
         append_user_agent_candidate(result, seen, candidate, default_user_agent);
@@ -1436,16 +1454,27 @@ function get_subscription_user_agent(custom_user_agent) {
     return "sing-box/" + (version != "" ? version : "unknown");
 }
 
-function user_agent_candidates(configured_user_agent, preferred_user_agent, default_user_agent) {
+function user_agent_candidates(configured_user_agent, preferred_user_agent, default_user_agent, format_preference) {
     configured_user_agent = as_string(configured_user_agent);
     if (configured_user_agent != "")
         return [ configured_user_agent ];
 
     let result = [];
     let seen = {};
-    let candidates = [ default_user_agent, preferred_user_agent ];
-    for (let profile in auto_user_agent_profiles)
-        push(candidates, profile);
+    let candidates = [];
+    if (as_string(format_preference) == "xray") {
+        for (let candidate in xray_user_agent_candidates)
+            push(candidates, candidate);
+        push(candidates, default_user_agent);
+        push(candidates, preferred_user_agent);
+        for (let profile in auto_user_agent_profiles)
+            push(candidates, profile);
+    }
+    else {
+        candidates = [ default_user_agent, preferred_user_agent ];
+        for (let profile in auto_user_agent_profiles)
+            push(candidates, profile);
+    }
 
     for (let candidate in candidates) {
         candidate = as_string(candidate);
@@ -1611,7 +1640,9 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
     let parser = subscription_parser();
 
     let attempt_index = 0;
-    for (let effective_user_agent in user_agent_candidates(subscription_user_agent, cached_user_agent, default_user_agent)) {
+    let source_section_object = find_section(sections, section_name_value);
+    let format_preference = connections.subscription_format_preference(source_section_object, subscription_url);
+    for (let effective_user_agent in user_agent_candidates(subscription_user_agent, cached_user_agent, default_user_agent, format_preference)) {
         attempt_index++;
         unlink_path(raw_tmpfile);
         unlink_path(headers_tmpfile);
@@ -2522,7 +2553,7 @@ else if (mode == "user-agent-matches-config") {
     exit(user_agent_matches_config(ARGV[1], ARGV[2], ARGV[3]) ? 0 : 1);
 }
 else if (mode == "write-user-agent-candidates") {
-    write_user_agent_candidates(ARGV[1], ARGV[2], ARGV[3], ARGV[4]);
+    write_user_agent_candidates(ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5] || "");
 }
 else if (mode == "source-id") {
     print(source_id(ARGV[1], int(ARGV[2] || 0)), "\n");
