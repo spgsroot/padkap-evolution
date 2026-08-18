@@ -392,6 +392,112 @@ if grep -Fq '"8.8.8.8/32"' "$WORK_DIR/block-doh-off.json"; then
   fail "block_doh off must not emit DoH CIDR reject rules"
 fi
 
+mkdir -p "$WORK_DIR/subscriptions" "$WORK_DIR/persistent-subscription-cache"
+cat >"$WORK_DIR/subscriptions/keyword_filter-subscription-1.json" <<'JSON'
+{
+  "outbounds": [
+    {
+      "type": "socks",
+      "tag": "de-one",
+      "remark": "🇩🇪 Frankfurt 01",
+      "server": "127.0.0.1",
+      "server_port": 1080
+    },
+    {
+      "type": "socks",
+      "tag": "de-two",
+      "remark": "🇩🇪 Trial Frankfurt",
+      "server": "127.0.0.2",
+      "server_port": 1080
+    },
+    {
+      "type": "socks",
+      "tag": "us-one",
+      "remark": "US New York",
+      "server": "127.0.0.3",
+      "server_port": 1080
+    },
+    {
+      "type": "socks",
+      "tag": "ru-one",
+      "remark": "БЕРЛИН-1",
+      "server": "127.0.0.4",
+      "server_port": 1080
+    }
+  ]
+}
+JSON
+printf '%s' 'https://example.com/keywords.json' >"$WORK_DIR/subscriptions/keyword_filter-subscription-1.url"
+printf '%s' 'Happ' >"$WORK_DIR/subscriptions/keyword_filter-subscription-1.user_agent"
+cat >"$WORK_DIR/keyword-filter-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "keyword_filter",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "subscription_urls": [ "https://example.com/keywords.json" ],
+      "subscription_url_settings": "{\"https://example.com/keywords.json\":{\"user_agent\":\"Happ\"}}",
+      "subscription_filter_include_keywords": [ "🇩🇪", "берлин" ],
+      "subscription_filter_exclude_keywords": [ "TRIAL" ],
+      "domain_suffix": [ "keyword.example" ]
+    }
+  ]
+}
+JSON
+generate_config_with_subscription_cache \
+  "$WORK_DIR/keyword-filter-fixture.json" "$WORK_DIR/keyword-filter.json"
+grep -Fq '"de-one"' "$WORK_DIR/keyword-filter.json" ||
+  fail "keyword filter must keep emoji-matching node"
+grep -Fq '"ru-one"' "$WORK_DIR/keyword-filter.json" ||
+  fail "keyword filter must match Cyrillic case-insensitively"
+grep -Fq '"БЕРЛИН-1"' "$WORK_DIR/keyword-filter.json.section-cache/keyword_filter.json" ||
+  fail "keyword filter must keep the node remark"
+if grep -Fq '"de-two"' "$WORK_DIR/keyword-filter.json"; then
+  fail "keyword filter must drop excluded keyword node"
+fi
+if grep -Fq '"us-one"' "$WORK_DIR/keyword-filter.json"; then
+  fail "keyword filter must drop nodes not matching any include keyword"
+fi
+
+cat >"$WORK_DIR/keyword-filter-empty-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1"
+  },
+  "section": [
+    {
+      ".name": "keyword_filter",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "subscription_urls": [ "https://example.com/keywords.json" ],
+      "subscription_url_settings": "{\"https://example.com/keywords.json\":{\"user_agent\":\"Happ\"}}",
+      "subscription_filter_include_keywords": [ "nonexistent-keyword" ]
+    }
+  ]
+}
+JSON
+if generate_config_with_subscription_cache \
+  "$WORK_DIR/keyword-filter-empty-fixture.json" "$WORK_DIR/keyword-filter-empty.json" \
+  >"$WORK_DIR/keyword-filter-empty.stdout" 2>"$WORK_DIR/keyword-filter-empty.stderr"; then
+  fail "generator must reject a section emptied by the keyword filter"
+fi
+grep -Fq 'keyword filter removed all nodes' "$WORK_DIR/keyword-filter-empty.stderr" ||
+  fail "generator must explain the emptied keyword filter"
+
 cat >"$WORK_DIR/disabled-updates-fixture.json" <<'JSON'
 {
   "settings": {

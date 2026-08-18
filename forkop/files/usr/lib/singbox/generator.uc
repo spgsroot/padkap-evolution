@@ -523,6 +523,80 @@ function subscription_outbound_display_name(outbound) {
         : "unknown";
 }
 
+function subscription_keyword_fold(value) {
+    value = as_string(value);
+    let bytes = [];
+    let i = 0;
+    while (i < length(value)) {
+        let b = ord(substr(value, i, 1));
+        if (b >= 65 && b <= 90) {
+            push(bytes, b + 32);
+            i += 1;
+        }
+        else if (b == 0xD0 && i + 1 < length(value)) {
+            let b2 = ord(substr(value, i + 1, 1));
+            if (b2 >= 0x90 && b2 <= 0x9F)
+                push(bytes, 0xD0, b2 + 0x20);
+            else if (b2 >= 0xA0 && b2 <= 0xAF)
+                push(bytes, 0xD1, b2 - 0x20);
+            else if (b2 == 0x81)
+                push(bytes, 0xD1, 0x91);
+            else
+                push(bytes, b, b2);
+            i += 2;
+        }
+        else {
+            push(bytes, b);
+            i += 1;
+        }
+    }
+
+    let result = "";
+    for (let byte in bytes)
+        result += chr(byte);
+    return result;
+}
+
+function subscription_keyword_filter(section) {
+    let include = list_option(section, "subscription_filter_include_keywords");
+    let exclude = list_option(section, "subscription_filter_exclude_keywords");
+    if (length(include) == 0 && length(exclude) == 0)
+        return null;
+
+    let folded_include = [];
+    for (let keyword in include) {
+        keyword = as_string(keyword);
+        if (keyword != "")
+            push(folded_include, subscription_keyword_fold(keyword));
+    }
+    let folded_exclude = [];
+    for (let keyword in exclude) {
+        keyword = as_string(keyword);
+        if (keyword != "")
+            push(folded_exclude, subscription_keyword_fold(keyword));
+    }
+    if (length(folded_include) == 0 && length(folded_exclude) == 0)
+        return null;
+
+    return {
+        include: folded_include,
+        exclude: folded_exclude
+    };
+}
+
+function subscription_keyword_name_passes(filter, name) {
+    let folded = subscription_keyword_fold(name);
+    for (let keyword in filter.exclude)
+        if (index(folded, keyword) >= 0)
+            return false;
+    if (length(filter.include) == 0)
+        return true;
+    for (let keyword in filter.include)
+        if (index(folded, keyword) >= 0)
+            return true;
+    return false;
+}
+
 function add_subscription_reference(refs, value) {
     value = as_string(value);
     if (value != "")
@@ -757,6 +831,7 @@ function add_subscription_source_with_state(config, section, source_index, sourc
     if (include_urltest_groups === false)
         hide_urltest_group_outbounds = false;
     node_prefix = trim(as_string(node_prefix));
+    let keyword_filter = subscription_keyword_filter(section);
     let prepared = [];
     let display_names = [];
     let source_links = [];
@@ -768,6 +843,8 @@ function add_subscription_source_with_state(config, section, source_index, sourc
         if (include_urltest_groups === false && subscription_urltest_group_outbound(outbound))
             continue;
         let display_name = as_string(outbound.remark || outbound.tag || ("server-" + (i + 1)));
+        if (keyword_filter != null && !subscription_group_outbound(outbound) && !subscription_keyword_name_passes(keyword_filter, display_name))
+            continue;
         let base = as_string(outbound.tag || outbound.remark || ("server-" + (i + 1)));
         if (node_prefix != "") {
             display_name = node_prefix + " " + display_name;
@@ -789,6 +866,9 @@ function add_subscription_source_with_state(config, section, source_index, sourc
         push(group_flags, subscription_group_outbound(outbound));
         push(hidden_flags, subscription_hidden_outbound(outbound, visibility_refs, hide_urltest_group_outbounds, hide_detour_outbounds));
     }
+
+    if (keyword_filter != null && length(prepared) == 0)
+        runtime_generate_unsupported("subscription keyword filter removed all nodes for rule '" + section_name + "'");
 
     if (length(keys(skipped)) > 0)
         warn("skipped unsupported subscription outbounds for rule '", section_name, "': ", subscription_skip_summary(skipped), "\n");

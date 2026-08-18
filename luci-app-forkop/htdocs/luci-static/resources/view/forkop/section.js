@@ -7277,6 +7277,34 @@ function createSectionContent(section) {
 
   o = section.taboption(
     "settings",
+    form.DynamicList,
+    "subscription_filter_include_keywords",
+    _("Subscription include keywords"),
+    _(
+      "Keep only subscription nodes whose name contains any of these keywords (empty keeps all). Case-insensitive, emoji supported.",
+    ),
+  );
+  o.depends("action", "connection");
+  o.rmempty = true;
+  o.modalonly = true;
+  o.placeholder = _("Add include keyword");
+
+  o = section.taboption(
+    "settings",
+    form.DynamicList,
+    "subscription_filter_exclude_keywords",
+    _("Subscription exclude keywords"),
+    _(
+      "Drop subscription nodes whose name contains any of these keywords. Case-insensitive, emoji supported.",
+    ),
+  );
+  o.depends("action", "connection");
+  o.rmempty = true;
+  o.modalonly = true;
+  o.placeholder = _("Add exclude keyword");
+
+  o = section.taboption(
+    "settings",
     InterfaceSettingsDynamicList,
     "interfaces",
     _("Network Interface"),
