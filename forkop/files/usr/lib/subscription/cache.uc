@@ -760,8 +760,8 @@ function subscription_source_profile(section, entry) {
     let user_agent = connections.subscription_user_agent(section, entry);
     if (user_agent != "")
         parsed.user_agent = user_agent;
-
     parsed.hwid = connections.subscription_hwid(section, entry);
+    parsed.insecure = connections.subscription_insecure(section, entry);
     parsed.download_section = connections.subscription_download_section(section, entry);
     parsed.update_enabled = connections.subscription_update_enabled(section, entry);
     parsed.update_interval = connections.subscription_update_interval(section, entry);
@@ -1463,7 +1463,7 @@ function get_subscription_hwid(custom_hwid) {
     return custom_hwid != "" ? custom_hwid : generate_hwid();
 }
 
-function download_subscription(url, filepath, http_proxy_address, headers_filepath, effective_user_agent, effective_hwid) {
+function download_subscription(url, filepath, http_proxy_address, headers_filepath, effective_user_agent, effective_hwid, allow_insecure) {
     let retries = 3;
     let wait_seconds = 2;
     let timeout = 15;
@@ -1489,6 +1489,8 @@ function download_subscription(url, filepath, http_proxy_address, headers_filepa
             push(args, "-x");
             push(args, "http://" + http_proxy_address);
         }
+        if (bool_value(allow_insecure, false))
+            push(args, "-k");
         if (headers_tmpfile != "") {
             push(args, "-D");
             push(args, headers_tmpfile);
@@ -1596,7 +1598,7 @@ function get_subscription_download_proxy_address(section_name_value, sections, p
     return address;
 }
 
-function download_subscription_into_cache(section_name_value, subscription_url, subscription_json_path, subscription_url_cache_path, service_proxy_address_value, subscription_user_agent, subscription_hwid, source_index, cache_section, metadata_output_path, sections) {
+function download_subscription_into_cache(section_name_value, subscription_url, subscription_json_path, subscription_url_cache_path, service_proxy_address_value, subscription_user_agent, subscription_hwid, allow_insecure, source_index, cache_section, metadata_output_path, sections) {
     ensure_dir(TMP_SUBSCRIPTION_FOLDER);
     let subscription_user_agent_cache_path = source_user_agent_path(TMP_SUBSCRIPTION_FOLDER, cache_section);
     let subscription_hwid_cache_path = source_hwid_path(TMP_SUBSCRIPTION_FOLDER, cache_section);
@@ -1617,7 +1619,7 @@ function download_subscription_into_cache(section_name_value, subscription_url, 
         unlink_path(metadata_tmpfile);
 
         let effective_hwid = get_subscription_hwid(subscription_hwid);
-        let download_status = download_subscription(subscription_url, raw_tmpfile, service_proxy_address_value, headers_tmpfile, effective_user_agent, effective_hwid);
+        let download_status = download_subscription(subscription_url, raw_tmpfile, service_proxy_address_value, headers_tmpfile, effective_user_agent, effective_hwid, allow_insecure);
         if (download_status != 0) {
             if (metadata_output_path != "")
                 unlink_path(metadata_output_path);
@@ -1809,6 +1811,7 @@ function update_subscription_source(section_name_value, index_value, entry, phas
         proxy,
         parsed.user_agent,
         parsed.hwid,
+        parsed.insecure,
         index,
         source_section,
         as_string(metadata_output_path),
@@ -2125,6 +2128,7 @@ function ensure_subscription_source_for_prepare(state, section, source_index, en
         proxy,
         parsed.user_agent,
         parsed.hwid,
+        parsed.insecure,
         source_index,
         source_section,
         metadata_output_path,

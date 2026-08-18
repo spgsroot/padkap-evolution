@@ -2040,6 +2040,7 @@ function subscriptionUrlSettingsKeys() {
     "include_urltest_groups",
     "hide_urltest_group_outbounds",
     "hide_detour_outbounds",
+    "subscription_insecure",
   ];
 }
 
@@ -2059,6 +2060,7 @@ function defaultSubscriptionUrlSettings() {
     include_urltest_groups: "1",
     hide_urltest_group_outbounds: "1",
     hide_detour_outbounds: "1",
+    subscription_insecure: "0",
   };
 }
 
@@ -2417,7 +2419,17 @@ function addSubscriptionUrlItemOptions(itemSection, options = {}) {
   );
   o.default = "1";
   o.rmempty = false;
-}
+
+  o = itemSection.option(
+    form.Flag,
+    "subscription_insecure",
+    _("Allow insecure TLS"),
+    _(
+      "Download this subscription without TLS certificate verification (for panels with self-signed or mismatched certificates)",
+    ),
+  );
+  o.default = "0";
+  o.rmempty = false;
 
 function addInterfaceItemOptions(itemSection) {
   let o = itemSection.option(

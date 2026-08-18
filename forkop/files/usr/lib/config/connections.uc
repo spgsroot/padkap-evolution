@@ -720,6 +720,13 @@ function subscription_download_section(section, value) {
     return item_option(section, "subscription_url_settings", value, "download_via_proxy_section", "");
 }
 
+function subscription_insecure(section, value) {
+    let child = child_item_by_value(section, "subscription_url", "url", value);
+    if (child != null)
+        return child_bool(child, "subscription_insecure", false);
+    return item_bool(section, "subscription_url_settings", value, "subscription_insecure", false);
+}
+
 function urltest_check_interval(section, value) {
     let child = urltest_child(section, value);
     if (child != null)
@@ -1136,6 +1143,7 @@ return {
     subscription_user_agent,
     subscription_hwid,
     subscription_download_section,
+    subscription_insecure,
     interface_domain_resolver_enabled,
     interface_domain_resolver_dns_type,
     interface_domain_resolver_dns_server,
