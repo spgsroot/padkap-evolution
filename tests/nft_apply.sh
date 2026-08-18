@@ -279,6 +279,35 @@ if grep -Fq $'ip\tdaddr\t198.18.0.0/15' "$NFT_LOG"; then
   fail "global proxy must replace destination-selective FakeIP marking"
 fi
 
+cat >"$WORK_DIR/runtime-base-block-doh.state" <<'EOF_UCI'
+forkop.settings=settings
+forkop.settings.source_network_interfaces=br-lan
+forkop.settings.exclude_ntp=0
+forkop.settings.block_doh=1
+EOF_UCI
+: > "$NFT_LOG"
+FORKOP_UCI_STATE_FILE="$WORK_DIR/runtime-base-block-doh.state" \
+  nft_ucode nft-create-runtime-base-from-uci ForkopTable localv4 forkop_subnets forkop_ports forkop_ip_ports forkop_interfaces 0x00100000 0x00200000 198.18.0.0/15 1602
+assert_contains "$NFT_LOG" $'nft\tadd\trule\tinet\tForkopTable\tmangle\tiifname\t@forkop_interfaces\tip\tdaddr\t8.8.8.8/32\tmeta\tmark\tset\t0x00100000\tcounter' "block doh IPv4 mark"
+assert_contains "$NFT_LOG" $'nft\tadd\trule\tinet\tForkopTable\tmangle\tiifname\t@forkop_interfaces\tip6\tdaddr\t2606:4700:4700::1111/128\tmeta\tmark\tset\t0x00100000\tcounter' "block doh IPv6 mark"
+assert_contains "$NFT_LOG" $'nft\tadd\trule\tinet\tForkopTable\tmangle\tiifname\t@forkop_interfaces\tip\tdaddr\t77.88.8.1/32\tmeta\tmark\tset\t0x00100000\tcounter' "block doh full IPv4 list"
+cat >"$WORK_DIR/runtime-base-global-proxy-doh.state" <<'EOF_UCI'
+forkop.settings=settings
+forkop.settings.source_network_interfaces=br-lan
+forkop.settings.exclude_ntp=0
+forkop.settings.block_doh=1
+forkop.global=section
+forkop.global.enabled=1
+forkop.global.action=connection
+forkop.global.global_proxy=1
+EOF_UCI
+: > "$NFT_LOG"
+FORKOP_UCI_STATE_FILE="$WORK_DIR/runtime-base-global-proxy-doh.state" \
+  nft_ucode nft-create-runtime-base-from-uci ForkopTable localv4 forkop_subnets forkop_ports forkop_ip_ports forkop_interfaces 0x00100000 0x00200000 198.18.0.0/15 1602
+if grep -Fq $'ip\tdaddr\t8.8.8.8/32' "$NFT_LOG"; then
+  fail "global proxy must skip redundant DoH mark rules"
+fi
+
 : > "$NFT_LOG"
 nft_ucode nft-create-runtime-output-rules ForkopTable localv4 forkop_subnets forkop_ports forkop_ip_ports 0x00100000 198.18.0.0/15
 assert_contains "$NFT_LOG" $'nft\tadd\trule\tinet\tForkopTable\tmangle_output\tip\tdaddr\t@forkop_subnets\tmeta\tl4proto\ttcp\tmeta\tmark\tset\t0x00100000\tcounter' "runtime output common tcp"
@@ -682,6 +711,8 @@ cat >"$WORK_DIR/signature-expected.txt" <<'EOF_EXPECTED'
 br-lan tun0
 [settings.exclude_ntp]
 1
+[settings.block_doh]
+0
 [rule.text_rule.action]
 bypass
 [rule.text_rule.global_proxy]
@@ -756,6 +787,8 @@ cat >"$WORK_DIR/signature-uci-expected.txt" <<'EOF_EXPECTED'
 br-lan tun0
 [settings.exclude_ntp]
 1
+[settings.block_doh]
+0
 [rule.enabled.action]
 bypass
 [rule.enabled.global_proxy]
@@ -791,6 +824,8 @@ cat >"$WORK_DIR/signature-defaults-expected.txt" <<'EOF_EXPECTED'
 [settings.source_network_interfaces]
 br-lan
 [settings.exclude_ntp]
+0
+[settings.block_doh]
 0
 EOF_EXPECTED
 expected_signature="$(md5sum "$WORK_DIR/signature-defaults-expected.txt" | awk '{print $1}')"

@@ -36,6 +36,7 @@ config settings 'settings'
         option log_level 'warn'
         option exclude_ntp '0'
         option shutdown_correctly '0'
+        option block_doh '0'
 
 #config section 'subscription_example'
 #        option label 'Subscription'

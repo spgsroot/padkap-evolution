@@ -452,6 +452,17 @@ function createSettingsContent(section, capabilities) {
 
   o = section.option(
     form.Flag,
+    "block_doh",
+    _("Block DoH"),
+    _(
+      "Block well-known DNS-over-HTTPS resolver IPs so LAN clients cannot bypass the router DNS",
+    ),
+  );
+  o.default = "0";
+  o.rmempty = false;
+
+  o = section.option(
+    form.Flag,
     "list_update_enabled",
     _("Enable list updates"),
     _("Enable automatic updates for remote lists and rule sets"),

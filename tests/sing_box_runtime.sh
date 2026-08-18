@@ -333,6 +333,65 @@ fi
 grep -Fq 'global_proxy' "$WORK_DIR/global-proxy-two.stderr" ||
   fail "generator must explain the single global proxy restriction"
 
+cat >"$WORK_DIR/block-doh-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1",
+    "block_doh": "1"
+  },
+  "section": [
+    {
+      ".name": "proxy",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "outbound_jsons": [ "{\"type\":\"direct\"}" ]
+    }
+  ]
+}
+JSON
+if ! ucode -L "$FORKOP_LIB" "$SINGBOX_GENERATOR_UC" generate-config-fixture \
+  "$WORK_DIR/block-doh-fixture.json" "$WORK_DIR/block-doh.json" "127.0.0.1" "0"; then
+  fail "generator must accept block_doh settings"
+fi
+grep -Fq '"8.8.8.8/32"' "$WORK_DIR/block-doh.json" ||
+  fail "block_doh must emit DoH IPv4 CIDR reject rules"
+grep -Fq '"2606:4700:4700::1111/128"' "$WORK_DIR/block-doh.json" ||
+  fail "block_doh must emit DoH IPv6 CIDR reject rules"
+
+cat >"$WORK_DIR/block-doh-off-fixture.json" <<'JSON'
+{
+  "settings": {
+    ".name": "settings",
+    ".type": "settings",
+    "config_path": "/tmp/sing-box/config.json",
+    "dns_server": "1.1.1.1",
+    "service_listen_address": "127.0.0.1",
+    "block_doh": "0"
+  },
+  "section": [
+    {
+      ".name": "proxy",
+      ".type": "section",
+      "enabled": "1",
+      "action": "connection",
+      "outbound_jsons": [ "{\"type\":\"direct\"}" ]
+    }
+  ]
+}
+JSON
+if ! ucode -L "$FORKOP_LIB" "$SINGBOX_GENERATOR_UC" generate-config-fixture \
+  "$WORK_DIR/block-doh-off-fixture.json" "$WORK_DIR/block-doh-off.json" "127.0.0.1" "0"; then
+  fail "generator must accept disabled block_doh"
+fi
+if grep -Fq '"8.8.8.8/32"' "$WORK_DIR/block-doh-off.json"; then
+  fail "block_doh off must not emit DoH CIDR reject rules"
+fi
+
 cat >"$WORK_DIR/disabled-updates-fixture.json" <<'JSON'
 {
   "settings": {
