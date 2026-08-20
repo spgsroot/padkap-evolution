@@ -58,15 +58,3 @@ apk add dist/release-final/forkop_*.apk dist/release-final/luci-app-forkop_*.apk
 * **Предпочтительный формат подписки** — `subscription_format_preference` (`auto` | `xray` | `singbox`): при `xray` первыми пробуются клиентские User-Agent, отдающие Xray JSON.
 * **Автогруппировка узлов** — `subscription_group_mode` (`off` | `country` | `prefix`) + `subscription_group_prefix_len`: URLTest-группы по флагу страны или префиксу имени и авто-выбор «⚡ Самый быстрый» среди групп.
 * **Списки ссылок текстом** — `selector_proxy_links_text` / `urltest_proxy_links_text`: вставка ссылок многострочным текстом, для urltest-варианта создаётся URLTest-группа с авто-выбором.
-
-### Документация
-
-Отдельной документации по этому форку пока нет. По базовым функциям см. апстрим: [Telegram-чат Forkop](https://t.me/forkop_chat) и AI-ассистент [@forkop_aibot](https://t.me/forkop_aibot).
-
-### Поддержать проект (апстрим Forkop)
-
-* 💳 **Карты РФ / СБП / Tinkoff Pay:** [Донат на CloudTips](https://pay.cloudtips.ru/p/385e5af2)
-* 💎 **USDT (сеть TON):** `UQAOCDav39WJ2gvnzs9RQ_IsF2dcGrcpw4U0j6XGO7je7uwm`
-* 🟢 **USDT (сеть TRC-20):** `TEMaZFyM8RQpkbd5LvB8CFJwxCyhHauKAe`
-* 🪙 **USDT (сети ERC-20 / BEP-20 / Polygon / Monad):** `0xe8aabb21c320240fe45b6087e68c6fe40a92d8bf`
-* 🟠 **USDT (сеть Solana):** `AhhUjTci9zDKQjUfgLacFR4LiHX9nmZud6DZ8YdbpjEB`
