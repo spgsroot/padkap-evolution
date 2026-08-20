@@ -1,26 +1,31 @@
-# Forkop (Podkop Plus)
+# padkap-evolution
 
-[![Star](https://img.shields.io/github/stars/ushan0v/forkop?style=social)](https://github.com/ushan0v/forkop/stargazers)
-[![Releases](https://img.shields.io/github/v/release/ushan0v/forkop?label=releases)](https://github.com/ushan0v/forkop/releases)
-[![Telegram](https://img.shields.io/badge/Telegram-Forkop%20%7C%20Chat-2CA5E0?logo=telegram\&logoColor=white)](https://t.me/forkop_chat)
-[![AI Assistant](https://img.shields.io/badge/Telegram-Forkop%20%7C%20AI%20Assistant-2CA5E0?logo=telegram\&logoColor=white)](https://t.me/forkop_aibot)
+[![Star](https://img.shields.io/github/stars/spgsroot/padkap-evolution?style=social)](https://github.com/spgsroot/padkap-evolution/stargazers)
+[![Releases](https://img.shields.io/github/v/release/spgsroot/padkap-evolution?label=releases)](https://github.com/spgsroot/padkap-evolution/releases)
 
-> **Forkop — это бывший Podkop Plus.** Проект переименован и продолжает развиваться как независимый форк [Podkop](https://github.com/itdoginfo/podkop).
+> **padkap-evolution** — форк [Forkop](https://github.com/ushan0v/forkop) (бывший Podkop Plus, форк [Podkop](https://github.com/itdoginfo/podkop)) с функциями, перенесёнными из [NetShift](https://github.com/yandexru45/netshift). Бэкенд — ucode, пакеты `forkop` / `luci-app-forkop`.
 
 ### Установка
+
+Пакеты релизов апстрима Forkop:
 
 ```sh
 sh <(wget -O - https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh)
 ```
 
-<details>
-<summary><sub>Альтернативный способ установки</sub></summary>
+Сборка этого форка (ipk для OpenWrt 24.10, apk для 25.12+):
 
 ```sh
-sh <(wget -O - https://forkop.sourceforge.io/install.sh)
+git clone https://github.com/spgsroot/padkap-evolution.git
+cd padkap-evolution
+bash build.sh 1.0.6
+# OpenWrt 24.10 (opkg):
+opkg install dist/release-final/forkop_*.ipk dist/release-final/luci-app-forkop_*.ipk
+# OpenWrt 25.12+ (apk):
+apk add dist/release-final/forkop_*.apk dist/release-final/luci-app-forkop_*.apk
 ```
 
-</details>
+Интерфейс появится в LuCI: **Services → Forkop**.
 
 ### Что нового в этом форке
 
@@ -44,13 +49,21 @@ sh <(wget -O - https://forkop.sourceforge.io/install.sh)
 * Служба полностью переписана на ucode.
 * Другие исправления и улучшения.
 
+### Что перенесено из NetShift
+
+* **Глобальный прокси** — весь LAN-трафик через выбранный outbound: `option global_proxy '1'` на секции с действием Connection.
+* **Блокировка DoH** — известные DoH-резолверы маркируются в sing-box и отбрасываются на уровне маршрутов: `option block_doh '1'` в секции `settings`.
+* **Фильтры подписки по ключевым словам** — белый/чёрный список по имени узла, без учёта регистра, работает и по эмодзи: `list subscription_filter_include_keywords` / `list subscription_filter_exclude_keywords`.
+* **Небезопасный TLS для подписки** — для панелей с самоподписанным или несовпадающим сертификатом: `subscription_insecure '1'` в настройках URL подписки.
+* **Предпочтительный формат подписки** — `subscription_format_preference` (`auto` | `xray` | `singbox`): при `xray` первыми пробуются клиентские User-Agent, отдающие Xray JSON.
+* **Автогруппировка узлов** — `subscription_group_mode` (`off` | `country` | `prefix`) + `subscription_group_prefix_len`: URLTest-группы по флагу страны или префиксу имени и авто-выбор «⚡ Самый быстрый» среди групп.
+* **Списки ссылок текстом** — `selector_proxy_links_text` / `urltest_proxy_links_text`: вставка ссылок многострочным текстом, для urltest-варианта создаётся URLTest-группа с авто-выбором.
+
 ### Документация
 
-Отдельной документации со всеми изменениями, нововведениями и инструкцией по настройке пока что не существует. Задать вопрос, сообщить о проблеме или обсудить проект можно в [Telegram-чате](https://t.me/forkop_chat) проекта.
+Отдельной документации по этому форку пока нет. По базовым функциям см. апстрим: [Telegram-чат Forkop](https://t.me/forkop_chat) и AI-ассистент [@forkop_aibot](https://t.me/forkop_aibot).
 
-Как альтернативу документации для быстрых персонализированных ответов используйте бесплатного, специально для этого созданного, AI-ассистента [@forkop_aibot](https://t.me/forkop_aibot).
-
-### Поддержать проект
+### Поддержать проект (апстрим Forkop)
 
 * 💳 **Карты РФ / СБП / Tinkoff Pay:** [Донат на CloudTips](https://pay.cloudtips.ru/p/385e5af2)
 * 💎 **USDT (сеть TON):** `UQAOCDav39WJ2gvnzs9RQ_IsF2dcGrcpw4U0j6XGO7je7uwm`
