@@ -1358,7 +1358,7 @@ function asset_matches(name, kind, ext, version) {
         return false;
 
     if (kind == "backend")
-        return name == "padkap_evolution_" + version + "." + ext;
+        return name == "padkap-evolution_" + version + "." + ext;
     if (kind == "app")
         return name == "luci-app-padkap-evolution_" + version + "." + ext;
     if (kind == "i18n")
@@ -1725,7 +1725,7 @@ resolve_padkap_evolution_release() {
 
     PADKAP_EVOLUTION_BACKEND_NAME="$(basename "$PADKAP_EVOLUTION_BACKEND_URL")"
     PADKAP_EVOLUTION_APP_NAME="$(basename "$PADKAP_EVOLUTION_APP_URL")"
-    PADKAP_EVOLUTION_PACKAGE_VERSION="$(printf '%s\n' "$PADKAP_EVOLUTION_BACKEND_NAME" | sed 's/^padkap_evolution_//;s/\.ipk$//;s/\.apk$//')"
+    PADKAP_EVOLUTION_PACKAGE_VERSION="$(printf '%s\n' "$PADKAP_EVOLUTION_BACKEND_NAME" | sed 's/^padkap-evolution_//;s/\.ipk$//;s/\.apk$//')"
 
     PADKAP_EVOLUTION_I18N_URL=""
     PADKAP_EVOLUTION_I18N_NAME=""

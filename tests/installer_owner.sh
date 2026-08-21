@@ -203,10 +203,10 @@ grep -Fq 'legacy_config_present=0' "$detect_legacy_block" ||
 
 printf '%s\n' '{"tag_name":"0.0.1"}' | ucode "$helper" release-tag | grep -Fxq '0.0.1' ||
   fail "embedded helper release-tag mode must parse release JSON"
-release_json='{"tag_name":"0.0.1","assets":[{"name":"padkap_evolution_0.0.1.ipk","browser_download_url":"https://example.com/padkap-evolution.ipk"}]}'
+release_json='{"tag_name":"0.0.1","assets":[{"name":"padkap-evolution_0.0.1.ipk","browser_download_url":"https://example.com/padkap-evolution.ipk"}]}'
 printf '%s' "$release_json" | ucode "$helper" release-asset-url backend ipk | grep -Fxq 'https://example.com/padkap-evolution.ipk' ||
   fail "embedded helper must resolve the exact three-part Padkap Evolution package name"
-if printf '%s' '{"tag_name":"0.0.1","assets":[{"name":"padkap_evolution_0.0.1_all.ipk","browser_download_url":"https://example.com/old.ipk"}]}' |
+if printf '%s' '{"tag_name":"0.0.1","assets":[{"name":"padkap-evolution_0.0.1_all.ipk","browser_download_url":"https://example.com/old.ipk"}]}' |
   ucode "$helper" release-asset-url backend ipk | grep -q .; then
   fail "embedded helper must reject package names outside the Padkap Evolution release format"
 fi
