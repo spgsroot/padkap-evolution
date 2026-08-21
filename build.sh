@@ -660,7 +660,7 @@ main() {
   fi
   output_dir="$OUTPUT_DIR"
   mkdir -p "$output_dir"
-  rm -f "$output_dir"/padkap_evolution_* "$output_dir"/luci-app-padkap-evolution_* "$output_dir"/luci-i18n-padkap-evolution-ru_*
+  rm -f "$output_dir"/padkap-evolution_* "$output_dir"/luci-app-padkap-evolution_* "$output_dir"/luci-i18n-padkap-evolution-ru_*
 
   ipk_archive="$(download_sdk_archive "$IPK_SDK_URL")"
   apk_archive="$(download_sdk_archive "$APK_SDK_URL")"
@@ -690,7 +690,7 @@ main() {
     "padkap-evolution" \
     "$backend_root" \
     "$backend_control" \
-    "$output_dir/padkap_evolution_${RELEASE_VERSION}.ipk"
+    "$output_dir/padkap-evolution_${RELEASE_VERSION}.ipk"
 
   build_ipk_package \
     "$ipkg_build_bin" \
@@ -722,7 +722,7 @@ main() {
     "$backend_root" \
     "$apk_scripts" \
     "backend" \
-    "$output_dir/padkap_evolution_${RELEASE_VERSION}.apk" \
+    "$output_dir/padkap-evolution_${RELEASE_VERSION}.apk" \
     "$MAINTAINER"
 
   build_apk_package \
@@ -749,10 +749,10 @@ main() {
     "$output_dir/luci-i18n-padkap-evolution-ru_${RELEASE_VERSION}.apk" \
     "$MAINTAINER"
 
-  verify_ipk_metadata "$output_dir/padkap_evolution_${RELEASE_VERSION}.ipk" "padkap-evolution" "$RELEASE_VERSION"
+  verify_ipk_metadata "$output_dir/padkap-evolution_${RELEASE_VERSION}.ipk" "padkap-evolution" "$RELEASE_VERSION"
   verify_ipk_metadata "$output_dir/luci-app-padkap-evolution_${RELEASE_VERSION}.ipk" "luci-app-padkap-evolution" "$RELEASE_VERSION"
   verify_ipk_metadata "$output_dir/luci-i18n-padkap-evolution-ru_${RELEASE_VERSION}.ipk" "luci-i18n-padkap-evolution-ru" "$RELEASE_VERSION"
-  verify_apk_metadata "$apk_bin" "$output_dir/padkap_evolution_${RELEASE_VERSION}.apk" "padkap-evolution" "$APK_INTERNAL_VERSION"
+  verify_apk_metadata "$apk_bin" "$output_dir/padkap-evolution_${RELEASE_VERSION}.apk" "padkap-evolution" "$APK_INTERNAL_VERSION"
   verify_apk_metadata "$apk_bin" "$output_dir/luci-app-padkap-evolution_${RELEASE_VERSION}.apk" "luci-app-padkap-evolution" "$APK_INTERNAL_VERSION"
   verify_apk_metadata "$apk_bin" "$output_dir/luci-i18n-padkap-evolution-ru_${RELEASE_VERSION}.apk" "luci-i18n-padkap-evolution-ru" "$APK_INTERNAL_VERSION"
 
