@@ -2,6 +2,8 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The stable tag must exist in the repository (pushed to origin) so CI can
+# fetch it for the config-contract baseline comparison.
 STABLE_REF="${PADKAP_EVOLUTION_STABLE_REF:-0.7.19.9}"
 STABLE_REPO="${PADKAP_EVOLUTION_STABLE_REPO:-}"
 MATRIX_SCRIPT="$ROOT_DIR/tests/helpers/config_contract_matrix.js"
