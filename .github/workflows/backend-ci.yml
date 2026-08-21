@@ -56,4 +56,20 @@ jobs:
       - name: Run backend tests
         shell: bash
         run: |
-          printf '%s\0' tests/*.sh | xargs -0 -n1 -P4 bash
+          rm -rf test-logs && mkdir test-logs
+          printf '%s\0' tests/*.sh | xargs -0 -n1 -P4 bash -c '
+            script="$1"
+            log="test-logs/$(basename "$script").log"
+            if ! bash "$script" >"$log" 2>&1; then
+              touch "test-logs/$(basename "$script").failed"
+            fi
+          ' _
+          failed=0
+          for marker in test-logs/*.failed; do
+            [ -e "$marker" ] || continue
+            name="$(basename "$marker" .failed)"
+            message="$(grep -m1 -E 'FAIL:' "test-logs/$name.log" | head -c 300 || true)"
+            echo "::error file=tests/$name.sh::${message:-test failed without a FAIL line}"
+            failed=1
+          done
+          exit "$failed"
