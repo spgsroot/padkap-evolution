@@ -2,8 +2,8 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SECTION_JS="$ROOT_DIR/luci-app-forkop/htdocs/luci-static/resources/view/forkop/section.js"
-MONITORING_STYLES="$ROOT_DIR/fe-app-forkop/src/forkop/tabs/monitoring/styles.ts"
+SECTION_JS="$ROOT_DIR/luci-app-padkap-evolution/htdocs/luci-static/resources/view/padkap-evolution/section.js"
+MONITORING_STYLES="$ROOT_DIR/fe-app-padkap-evolution/src/padkap-evolution/tabs/monitoring/styles.ts"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -133,7 +133,7 @@ ports_line="$(grep -n 'dependsOnRoutingAction(portsOption);' <<<"$create_section
 dashboard_line="$(grep -n 'addDashboardServerFilterOptions(section);' <<<"$create_section" | cut -d: -f1)"
 [[ "$dashboard_line" -gt "$ports_line" ]] ||
   fail "dashboard server filter must be the last section option block"
-if grep -Fq '__forkop_no_group__' "$SECTION_JS"; then
+if grep -Fq '__padkap_evolution_no_group__' "$SECTION_JS"; then
   fail "dashboard group selectors must not duplicate the placeholder with a fake choice"
 fi
 

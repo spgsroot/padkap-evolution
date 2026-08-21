@@ -3,29 +3,27 @@
 [![Star](https://img.shields.io/github/stars/spgsroot/padkap-evolution?style=social)](https://github.com/spgsroot/padkap-evolution/stargazers)
 [![Releases](https://img.shields.io/github/v/release/spgsroot/padkap-evolution?label=releases)](https://github.com/spgsroot/padkap-evolution/releases)
 
-> **padkap-evolution** — форк [Forkop](https://github.com/ushan0v/forkop) (бывший Podkop Plus, форк [Podkop](https://github.com/itdoginfo/podkop)) с функциями, перенесёнными из [NetShift](https://github.com/yandexru45/netshift). Бэкенд — ucode, пакеты `forkop` / `luci-app-forkop`.
+> **padkap-evolution** — форк [Forkop](https://github.com/ushan0v/forkop) (бывший Podkop Plus, форк [Podkop](https://github.com/itdoginfo/podkop)) с функциями, перенесёнными из [NetShift](https://github.com/yandexru45/netshift). Бэкенд — ucode, пакеты `padkap-evolution` / `luci-app-padkap-evolution`.
 
 ### Установка
 
-Пакеты релизов апстрима Forkop:
-
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/ushan0v/forkop/main/install.sh)
+sh <(wget -O - https://raw.githubusercontent.com/spgsroot/padkap-evolution/main/install.sh)
 ```
 
-Сборка этого форка (ipk для OpenWrt 24.10, apk для 25.12+):
+Сборка пакетов из исходников (ipk для OpenWrt 24.10, apk для 25.12+):
 
 ```sh
 git clone https://github.com/spgsroot/padkap-evolution.git
 cd padkap-evolution
-bash build.sh 1.0.6
+bash build.sh 1.1.0
 # OpenWrt 24.10 (opkg):
-opkg install dist/release-final/forkop_*.ipk dist/release-final/luci-app-forkop_*.ipk
+opkg install dist/release-final/padkap-evolution_*.ipk dist/release-final/luci-app-padkap-evolution_*.ipk
 # OpenWrt 25.12+ (apk):
-apk add dist/release-final/forkop_*.apk dist/release-final/luci-app-forkop_*.apk
+apk add dist/release-final/padkap-evolution_*.apk dist/release-final/luci-app-padkap-evolution_*.apk
 ```
 
-Интерфейс появится в LuCI: **Services → Forkop**.
+Интерфейс появится в LuCI: **Services → Padkap Evolution**.
 
 ### Что нового в этом форке
 

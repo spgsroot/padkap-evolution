@@ -1,0 +1,61 @@
+{
+  "luci-app-padkap-evolution": {
+    "description": "Grant UCI and RPC access to LuCI app Padkap Evolution",
+    "read": {
+      "file": {
+        "/etc/init.d/padkap-evolution": [
+          "exec"
+        ],
+        "/var/run/padkap-evolution/section-cache/*": [
+          "read"
+        ],
+        "/var/run/padkap-evolution/component-actions/*": [
+          "read"
+        ],
+        "/var/run/padkap-evolution/ui-state/*": [
+          "read"
+        ],
+        "/var/run/padkap-evolution/ui-state/service-actions/*": [
+          "read"
+        ],
+        "/var/run/padkap-evolution/ui-state/latency-actions/*": [
+          "read"
+        ],
+        "/usr/bin/padkap-evolution": [
+          "exec"
+        ]
+      },
+      "ubus": {
+        "luci-rpc": [
+          "getDHCPLeases",
+          "getHostHints"
+        ],
+        "network.interface": [
+          "dump"
+        ],
+        "service": [
+          "list"
+        ]
+      },
+      "uci": [
+        "padkap-evolution"
+      ]
+    },
+    "write": {
+      "file": {
+        "/var/run/padkap-evolution/ui-state/*": [
+          "write"
+        ],
+        "/var/run/padkap-evolution/ui-state/service-actions/*": [
+          "write"
+        ],
+        "/var/run/padkap-evolution/ui-state/latency-actions/*": [
+          "write"
+        ]
+      },
+      "uci": [
+        "padkap-evolution"
+      ]
+    }
+  }
+}

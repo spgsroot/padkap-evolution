@@ -2,8 +2,8 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SECTION_JS="$ROOT_DIR/luci-app-forkop/htdocs/luci-static/resources/view/forkop/section.js"
-LOCAL_DEVICES_JS="$ROOT_DIR/luci-app-forkop/htdocs/luci-static/resources/view/forkop/local_devices.js"
+SECTION_JS="$ROOT_DIR/luci-app-padkap-evolution/htdocs/luci-static/resources/view/padkap-evolution/section.js"
+LOCAL_DEVICES_JS="$ROOT_DIR/luci-app-padkap-evolution/htdocs/luci-static/resources/view/padkap-evolution/local_devices.js"
 
 node - "$SECTION_JS" "$LOCAL_DEVICES_JS" <<'NODE'
 const fs = require("fs");

@@ -1,7 +1,7 @@
 .idea
-fe-app-forkop/node_modules
-fe-app-forkop/.yarn/
-fe-app-forkop/.env
+fe-app-padkap-evolution/node_modules
+fe-app-padkap-evolution/.yarn/
+fe-app-padkap-evolution/.env
 .DS_Store
 
 sandbox/

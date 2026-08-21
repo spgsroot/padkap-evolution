@@ -1,8 +1,8 @@
 #!/bin/sh
 # shellcheck shell=dash
 
-REPO_OWNER="ushan0v"
-REPO_NAME="forkop"
+REPO_OWNER="spgsroot"
+REPO_NAME="padkap-evolution"
 
 REQUIRED_SPACE_KB=15360
 CONNECT_TIMEOUT_SECONDS=15
@@ -12,25 +12,25 @@ DOWNLOAD_TIMEOUT_SECONDS=600
 PKG_IS_APK=0
 FETCHER=""
 TMP_DIR=""
-FORKOP_WAS_ENABLED=0
-FORKOP_WAS_RUNNING=0
-FORKOP_LEGACY_DETECTED=0
-FORKOP_I18N_REQUESTED=0
+PADKAP_EVOLUTION_WAS_ENABLED=0
+PADKAP_EVOLUTION_WAS_RUNNING=0
+PADKAP_EVOLUTION_LEGACY_DETECTED=0
+PADKAP_EVOLUTION_I18N_REQUESTED=0
 INSTALLER_LANG="en"
 SING_BOX_INSTALL_VARIANT=""
 
-FORKOP_RELEASE_JSON=""
-FORKOP_RELEASE_TAG=""
-FORKOP_BACKEND_URL=""
-FORKOP_BACKEND_NAME=""
-FORKOP_BACKEND_FILE=""
-FORKOP_APP_URL=""
-FORKOP_APP_NAME=""
-FORKOP_APP_FILE=""
-FORKOP_I18N_URL=""
-FORKOP_I18N_NAME=""
-FORKOP_I18N_FILE=""
-FORKOP_PACKAGE_VERSION=""
+PADKAP_EVOLUTION_RELEASE_JSON=""
+PADKAP_EVOLUTION_RELEASE_TAG=""
+PADKAP_EVOLUTION_BACKEND_URL=""
+PADKAP_EVOLUTION_BACKEND_NAME=""
+PADKAP_EVOLUTION_BACKEND_FILE=""
+PADKAP_EVOLUTION_APP_URL=""
+PADKAP_EVOLUTION_APP_NAME=""
+PADKAP_EVOLUTION_APP_FILE=""
+PADKAP_EVOLUTION_I18N_URL=""
+PADKAP_EVOLUTION_I18N_NAME=""
+PADKAP_EVOLUTION_I18N_FILE=""
+PADKAP_EVOLUTION_PACKAGE_VERSION=""
 LEGACY_BRAND="$(printf '\160\157\144\153\157\160')"
 LEGACY_BACKEND_PACKAGE="${LEGACY_BRAND}-plus"
 LEGACY_CONFIG_PACKAGE_ALT="${LEGACY_BRAND}_plus"
@@ -55,10 +55,10 @@ usage() {
     cat <<EOF
 Usage: $0
 
-Installs or updates Forkop packages:
-  - forkop
-  - luci-app-forkop
-  - luci-i18n-forkop-ru when requested or when LuCI language is Russian
+Installs or updates Padkap Evolution packages:
+  - padkap-evolution
+  - luci-app-padkap-evolution
+  - luci-i18n-padkap-evolution-ru when requested or when LuCI language is Russian
 
 Can also install or switch sing-box variant:
   - stable sing-box from OpenWrt feeds
@@ -97,10 +97,10 @@ command_exists() {
 }
 
 init_tmp_dir() {
-    TMP_DIR="$(mktemp -d /tmp/forkop.XXXXXX 2>/dev/null || true)"
+    TMP_DIR="$(mktemp -d /tmp/padkap-evolution.XXXXXX 2>/dev/null || true)"
 
     if [ -z "$TMP_DIR" ]; then
-        TMP_DIR="/tmp/forkop.$$"
+        TMP_DIR="/tmp/padkap-evolution.$$"
         mkdir -p "$TMP_DIR" || fail "Failed to create temporary directory: $TMP_DIR"
     fi
 }
@@ -116,24 +116,24 @@ detect_fetcher() {
         return 0
     fi
 
-    fail "wget or curl is required to download Forkop"
+    fail "wget or curl is required to download Padkap Evolution"
 }
 
 run_with_deadline() {
-    forkop_deadline_seconds="$1"
+    padkap_evolution_deadline_seconds="$1"
     shift
 
-    forkop_deadline_helper="${FORKOP_DEADLINE_HELPER_PATH:-}"
-    if [ -z "$forkop_deadline_helper" ]; then
-        forkop_deadline_helper="$(install_deadline_helper_path)" || return 1
+    padkap_evolution_deadline_helper="${PADKAP_EVOLUTION_DEADLINE_HELPER_PATH:-}"
+    if [ -z "$padkap_evolution_deadline_helper" ]; then
+        padkap_evolution_deadline_helper="$(install_deadline_helper_path)" || return 1
     fi
 
-    forkop_deadline_result="$TMP_DIR/deadline-result.$$"
-    "$forkop_deadline_helper" run "$forkop_deadline_seconds" "$forkop_deadline_result" "$@"
-    forkop_deadline_status=$?
-    rm -f "$forkop_deadline_result.output" "$forkop_deadline_result.error" \
-        "$forkop_deadline_result.status" "$forkop_deadline_result.timeout"
-    return "$forkop_deadline_status"
+    padkap_evolution_deadline_result="$TMP_DIR/deadline-result.$$"
+    "$padkap_evolution_deadline_helper" run "$padkap_evolution_deadline_seconds" "$padkap_evolution_deadline_result" "$@"
+    padkap_evolution_deadline_status=$?
+    rm -f "$padkap_evolution_deadline_result.output" "$padkap_evolution_deadline_result.error" \
+        "$padkap_evolution_deadline_result.status" "$padkap_evolution_deadline_result.timeout"
+    return "$padkap_evolution_deadline_status"
 }
 
 install_deadline_helper_path() {
@@ -575,57 +575,57 @@ function env(name, fallback) {
     return as_string(value);
 }
 
-const INSTALLER_FORKOP_INIT = env("FORKOP_INSTALLER_INIT", "/etc/init.d/forkop");
-const INSTALLER_FORKOP_BIN = env("FORKOP_INSTALLER_BIN", "/usr/bin/forkop");
-const INSTALLER_FORKOP_LIB = env("FORKOP_INSTALLER_LIB", "/usr/lib/forkop");
-const INSTALLER_FORKOP_PERSISTENT_DIR = env("FORKOP_INSTALLER_PERSISTENT_DIR", "/etc/forkop");
-const INSTALLER_FORKOP_UCI_DEFAULTS = env("FORKOP_INSTALLER_UCI_DEFAULTS", "/etc/uci-defaults/50_luci-forkop");
-const INSTALLER_FORKOP_LUCI_VIEW = env("FORKOP_INSTALLER_LUCI_VIEW", "/www/luci-static/resources/view/forkop");
-const INSTALLER_MENU_JSON = env("FORKOP_INSTALLER_MENU_JSON", "/usr/share/luci/menu.d/luci-app-forkop.json");
-const INSTALLER_ACL_JSON = env("FORKOP_INSTALLER_ACL_JSON", "/usr/share/rpcd/acl.d/luci-app-forkop.json");
-const INSTALLER_RU_LMO = env("FORKOP_INSTALLER_RU_LMO", "/usr/lib/lua/luci/i18n/forkop.ru.lmo");
-const INSTALLER_EN_LMO = env("FORKOP_INSTALLER_EN_LMO", "/usr/lib/lua/luci/i18n/forkop.en.lmo");
-const INSTALLER_RU_LUA = env("FORKOP_INSTALLER_RU_LUA", "/usr/lib/lua/luci/i18n/forkop.ru.lua");
-const INSTALLER_EN_LUA = env("FORKOP_INSTALLER_EN_LUA", "/usr/lib/lua/luci/i18n/forkop.en.lua");
-const INSTALLER_RPCD_INIT = env("FORKOP_INSTALLER_RPCD_INIT", "/etc/init.d/rpcd");
-const LEGACY_BRAND = env("FORKOP_INSTALLER_LEGACY_BRAND", "");
-const LEGACY_BACKEND_PACKAGE = env("FORKOP_INSTALLER_LEGACY_BACKEND", LEGACY_BRAND + "-plus");
-const LEGACY_CONFIG_PACKAGE_ALT = env("FORKOP_INSTALLER_LEGACY_CONFIG_ALT", LEGACY_BRAND + "_plus");
-const INSTALLER_LEGACY_INIT = env("FORKOP_INSTALLER_LEGACY_INIT", "/etc/init.d/" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_BASE_INIT = env("FORKOP_INSTALLER_LEGACY_BASE_INIT", "/etc/init.d/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_BIN = env("FORKOP_INSTALLER_LEGACY_BASE_BIN", "/usr/bin/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_LIB = env("FORKOP_INSTALLER_LEGACY_BASE_LIB", "/usr/lib/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_UCI_DEFAULTS = env("FORKOP_INSTALLER_LEGACY_BASE_UCI_DEFAULTS", "/etc/uci-defaults/50_luci-" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_LUCI_VIEW = env("FORKOP_INSTALLER_LEGACY_BASE_LUCI_VIEW", "/www/luci-static/resources/view/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_MENU_JSON = env("FORKOP_INSTALLER_LEGACY_BASE_MENU_JSON", "/usr/share/luci/menu.d/luci-app-" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_ACL_JSON = env("FORKOP_INSTALLER_LEGACY_BASE_ACL_JSON", "/usr/share/rpcd/acl.d/luci-app-" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_I18N = env("FORKOP_INSTALLER_LEGACY_BASE_I18N", "/usr/lib/lua/luci/i18n/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_CONFIG = env("FORKOP_INSTALLER_LEGACY_BASE_CONFIG", "/etc/config/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_PERSISTENT_DIR = env("FORKOP_INSTALLER_LEGACY_BASE_PERSISTENT_DIR", "/etc/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_RUNTIME_DIR = env("FORKOP_INSTALLER_LEGACY_BASE_RUNTIME_DIR", "/var/run/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_BASE_TMP_DIR = env("FORKOP_INSTALLER_LEGACY_BASE_TMP_DIR", "/tmp/" + LEGACY_BRAND);
-const INSTALLER_LEGACY_TMP_PACKAGE_GLOB = env("FORKOP_INSTALLER_LEGACY_TMP_PACKAGE_GLOB", "/tmp/*" + LEGACY_BRAND + "*");
-const INSTALLER_LEGACY_SCAN_ROOTS = env("FORKOP_INSTALLER_LEGACY_SCAN_ROOTS", "/tmp /var/run /etc /usr/lib /usr/share/luci /usr/share/rpcd /www/luci-static/resources/view");
-const INSTALLER_LEGACY_BIN = env("FORKOP_INSTALLER_LEGACY_BIN", "/usr/bin/" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_LIB = env("FORKOP_INSTALLER_LEGACY_LIB", "/usr/lib/" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_UCI_DEFAULTS = env("FORKOP_INSTALLER_LEGACY_UCI_DEFAULTS", "/etc/uci-defaults/50_luci-" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_LUCI_VIEW = env("FORKOP_INSTALLER_LEGACY_LUCI_VIEW", "/www/luci-static/resources/view/" + LEGACY_CONFIG_PACKAGE_ALT);
-const INSTALLER_LEGACY_MENU_JSON = env("FORKOP_INSTALLER_LEGACY_MENU_JSON", "/usr/share/luci/menu.d/luci-app-" + LEGACY_BACKEND_PACKAGE + ".json");
-const INSTALLER_LEGACY_ACL_JSON = env("FORKOP_INSTALLER_LEGACY_ACL_JSON", "/usr/share/rpcd/acl.d/luci-app-" + LEGACY_BACKEND_PACKAGE + ".json");
-const INSTALLER_LEGACY_CONFIG = env("FORKOP_INSTALLER_LEGACY_CONFIG", "/etc/config/" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_CONFIG_ALT = env("FORKOP_INSTALLER_LEGACY_CONFIG_FILE_ALT", "/etc/config/" + LEGACY_CONFIG_PACKAGE_ALT);
-const INSTALLER_LEGACY_PERSISTENT_DIR = env("FORKOP_INSTALLER_LEGACY_PERSISTENT_DIR", "/etc/" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_RUNTIME_DIR = env("FORKOP_INSTALLER_LEGACY_RUNTIME_DIR", "/var/run/" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_TMP_DIR = env("FORKOP_INSTALLER_LEGACY_TMP_DIR", "/tmp/" + LEGACY_BACKEND_PACKAGE);
-const INSTALLER_LEGACY_TMP_ALT_DIR = env("FORKOP_INSTALLER_LEGACY_TMP_ALT_DIR", "/tmp/" + LEGACY_CONFIG_PACKAGE_ALT);
-const INSTALLER_DEADLINE_HELPER = env("FORKOP_INSTALLER_DEADLINE_HELPER", "");
-const INSTALLER_COMMAND_RESULT = env("FORKOP_INSTALLER_COMMAND_RESULT", "/tmp/forkop-installer-command");
-const INSTALLER_RC_DIR = env("FORKOP_INSTALLER_RC_DIR", "/etc/rc.d");
-const INSTALLER_START_RETRY_FILE = env("FORKOP_INSTALLER_START_RETRY_FILE", "/var/run/forkop/start.retry");
-const INSTALLER_START_RETRY_PID_FILE = env("FORKOP_INSTALLER_START_RETRY_PID_FILE", "/var/run/forkop/start-retry.pid");
-const INSTALLER_ORPHAN_PPID = env("FORKOP_INSTALLER_ORPHAN_PPID", "1");
-const INSTALLER_SERVICE_PROBE_TIMEOUT = int(env("FORKOP_INSTALLER_SERVICE_PROBE_TIMEOUT", "6")) || 6;
-const INSTALLER_SERVICE_ACTION_TIMEOUT = int(env("FORKOP_INSTALLER_SERVICE_ACTION_TIMEOUT", "60")) || 60;
+const INSTALLER_PADKAP_EVOLUTION_INIT = env("PADKAP_EVOLUTION_INSTALLER_INIT", "/etc/init.d/padkap-evolution");
+const INSTALLER_PADKAP_EVOLUTION_BIN = env("PADKAP_EVOLUTION_INSTALLER_BIN", "/usr/bin/padkap-evolution");
+const INSTALLER_PADKAP_EVOLUTION_LIB = env("PADKAP_EVOLUTION_INSTALLER_LIB", "/usr/lib/padkap-evolution");
+const INSTALLER_PADKAP_EVOLUTION_PERSISTENT_DIR = env("PADKAP_EVOLUTION_INSTALLER_PERSISTENT_DIR", "/etc/padkap-evolution");
+const INSTALLER_PADKAP_EVOLUTION_UCI_DEFAULTS = env("PADKAP_EVOLUTION_INSTALLER_UCI_DEFAULTS", "/etc/uci-defaults/50_luci-padkap-evolution");
+const INSTALLER_PADKAP_EVOLUTION_LUCI_VIEW = env("PADKAP_EVOLUTION_INSTALLER_LUCI_VIEW", "/www/luci-static/resources/view/padkap-evolution");
+const INSTALLER_MENU_JSON = env("PADKAP_EVOLUTION_INSTALLER_MENU_JSON", "/usr/share/luci/menu.d/luci-app-padkap-evolution.json");
+const INSTALLER_ACL_JSON = env("PADKAP_EVOLUTION_INSTALLER_ACL_JSON", "/usr/share/rpcd/acl.d/luci-app-padkap-evolution.json");
+const INSTALLER_RU_LMO = env("PADKAP_EVOLUTION_INSTALLER_RU_LMO", "/usr/lib/lua/luci/i18n/padkap-evolution.ru.lmo");
+const INSTALLER_EN_LMO = env("PADKAP_EVOLUTION_INSTALLER_EN_LMO", "/usr/lib/lua/luci/i18n/padkap-evolution.en.lmo");
+const INSTALLER_RU_LUA = env("PADKAP_EVOLUTION_INSTALLER_RU_LUA", "/usr/lib/lua/luci/i18n/padkap-evolution.ru.lua");
+const INSTALLER_EN_LUA = env("PADKAP_EVOLUTION_INSTALLER_EN_LUA", "/usr/lib/lua/luci/i18n/padkap-evolution.en.lua");
+const INSTALLER_RPCD_INIT = env("PADKAP_EVOLUTION_INSTALLER_RPCD_INIT", "/etc/init.d/rpcd");
+const LEGACY_BRAND = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BRAND", "");
+const LEGACY_BACKEND_PACKAGE = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BACKEND", LEGACY_BRAND + "-plus");
+const LEGACY_CONFIG_PACKAGE_ALT = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_CONFIG_ALT", LEGACY_BRAND + "_plus");
+const INSTALLER_LEGACY_INIT = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_INIT", "/etc/init.d/" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_BASE_INIT = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_INIT", "/etc/init.d/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_BIN = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_BIN", "/usr/bin/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_LIB = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_LIB", "/usr/lib/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_UCI_DEFAULTS = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_UCI_DEFAULTS", "/etc/uci-defaults/50_luci-" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_LUCI_VIEW = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_LUCI_VIEW", "/www/luci-static/resources/view/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_MENU_JSON = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_MENU_JSON", "/usr/share/luci/menu.d/luci-app-" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_ACL_JSON = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_ACL_JSON", "/usr/share/rpcd/acl.d/luci-app-" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_I18N = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_I18N", "/usr/lib/lua/luci/i18n/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_CONFIG = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_CONFIG", "/etc/config/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_PERSISTENT_DIR = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_PERSISTENT_DIR", "/etc/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_RUNTIME_DIR = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_RUNTIME_DIR", "/var/run/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_BASE_TMP_DIR = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BASE_TMP_DIR", "/tmp/" + LEGACY_BRAND);
+const INSTALLER_LEGACY_TMP_PACKAGE_GLOB = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_TMP_PACKAGE_GLOB", "/tmp/*" + LEGACY_BRAND + "*");
+const INSTALLER_LEGACY_SCAN_ROOTS = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_SCAN_ROOTS", "/tmp /var/run /etc /usr/lib /usr/share/luci /usr/share/rpcd /www/luci-static/resources/view");
+const INSTALLER_LEGACY_BIN = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_BIN", "/usr/bin/" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_LIB = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_LIB", "/usr/lib/" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_UCI_DEFAULTS = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_UCI_DEFAULTS", "/etc/uci-defaults/50_luci-" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_LUCI_VIEW = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_LUCI_VIEW", "/www/luci-static/resources/view/" + LEGACY_CONFIG_PACKAGE_ALT);
+const INSTALLER_LEGACY_MENU_JSON = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_MENU_JSON", "/usr/share/luci/menu.d/luci-app-" + LEGACY_BACKEND_PACKAGE + ".json");
+const INSTALLER_LEGACY_ACL_JSON = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_ACL_JSON", "/usr/share/rpcd/acl.d/luci-app-" + LEGACY_BACKEND_PACKAGE + ".json");
+const INSTALLER_LEGACY_CONFIG = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_CONFIG", "/etc/config/" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_CONFIG_ALT = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_CONFIG_FILE_ALT", "/etc/config/" + LEGACY_CONFIG_PACKAGE_ALT);
+const INSTALLER_LEGACY_PERSISTENT_DIR = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_PERSISTENT_DIR", "/etc/" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_RUNTIME_DIR = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_RUNTIME_DIR", "/var/run/" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_TMP_DIR = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_TMP_DIR", "/tmp/" + LEGACY_BACKEND_PACKAGE);
+const INSTALLER_LEGACY_TMP_ALT_DIR = env("PADKAP_EVOLUTION_INSTALLER_LEGACY_TMP_ALT_DIR", "/tmp/" + LEGACY_CONFIG_PACKAGE_ALT);
+const INSTALLER_DEADLINE_HELPER = env("PADKAP_EVOLUTION_INSTALLER_DEADLINE_HELPER", "");
+const INSTALLER_COMMAND_RESULT = env("PADKAP_EVOLUTION_INSTALLER_COMMAND_RESULT", "/tmp/padkap-evolution-installer-command");
+const INSTALLER_RC_DIR = env("PADKAP_EVOLUTION_INSTALLER_RC_DIR", "/etc/rc.d");
+const INSTALLER_START_RETRY_FILE = env("PADKAP_EVOLUTION_INSTALLER_START_RETRY_FILE", "/var/run/padkap-evolution/start.retry");
+const INSTALLER_START_RETRY_PID_FILE = env("PADKAP_EVOLUTION_INSTALLER_START_RETRY_PID_FILE", "/var/run/padkap-evolution/start-retry.pid");
+const INSTALLER_ORPHAN_PPID = env("PADKAP_EVOLUTION_INSTALLER_ORPHAN_PPID", "1");
+const INSTALLER_SERVICE_PROBE_TIMEOUT = int(env("PADKAP_EVOLUTION_INSTALLER_SERVICE_PROBE_TIMEOUT", "6")) || 6;
+const INSTALLER_SERVICE_ACTION_TIMEOUT = int(env("PADKAP_EVOLUTION_INSTALLER_SERVICE_ACTION_TIMEOUT", "60")) || 60;
 
 let installer_command_sequence = 0;
 
@@ -657,9 +657,9 @@ function installer_command_result(args, timeout_seconds) {
     };
 }
 
-let dns_owner_config = "forkop";
-let dns_owner_section = "forkop";
-let dns_owner_option_prefix = "forkop_";
+let dns_owner_config = "padkap-evolution";
+let dns_owner_section = "padkap-evolution";
+let dns_owner_option_prefix = "padkap_evolution_";
 
 function path_exists(path) {
     return fs.stat(as_string(path)) != null;
@@ -875,7 +875,7 @@ function installer_cancel_stale_start_retry() {
     let pid = trim(read_text_file(INSTALLER_START_RETRY_PID_FILE));
     if (match(pid, /^[0-9]+$/)) {
         let args = installer_process_args(pid);
-        if (installer_args_contain(args, INSTALLER_FORKOP_INIT) &&
+        if (installer_args_contain(args, INSTALLER_PADKAP_EVOLUTION_INIT) &&
             installer_args_contain(args, "retry_start_on_wan_up"))
             installer_kill_process_tree(pid);
     }
@@ -970,9 +970,9 @@ function select_dns_owner(legacy) {
         dns_owner_option_prefix = LEGACY_BRAND + "_";
     }
     else {
-        dns_owner_config = "forkop";
-        dns_owner_section = "forkop";
-        dns_owner_option_prefix = "forkop_";
+        dns_owner_config = "padkap-evolution";
+        dns_owner_section = "padkap-evolution";
+        dns_owner_option_prefix = "padkap_evolution_";
     }
 }
 
@@ -998,13 +998,13 @@ function installer_deactivate_legacy_base() {
     }
 
     if (running.value) {
-        warn("Detected a running legacy service. Stopping it before installing Forkop.\n");
+        warn("Detected a running legacy service. Stopping it before installing Padkap Evolution.\n");
         if (!installer_service_action(INSTALLER_LEGACY_BASE_INIT, "stop"))
             return false;
     }
 
     if (enabled.value) {
-        warn("Detected an enabled legacy autostart. Disabling it before installing Forkop.\n");
+        warn("Detected an enabled legacy autostart. Disabling it before installing Padkap Evolution.\n");
         if (!installer_service_action(INSTALLER_LEGACY_BASE_INIT, "disable"))
             return false;
     }
@@ -1012,14 +1012,14 @@ function installer_deactivate_legacy_base() {
 }
 
 function installer_cleanup_legacy() {
-    let forkop_installed = installer_package_installed("forkop");
+    let padkap_evolution_installed = installer_package_installed("padkap-evolution");
     let legacy_installed = LEGACY_BRAND != "" && installer_package_installed(LEGACY_BACKEND_PACKAGE);
-    let active_init = legacy_installed ? INSTALLER_LEGACY_INIT : INSTALLER_FORKOP_INIT;
-    let active_bin = legacy_installed ? INSTALLER_LEGACY_BIN : INSTALLER_FORKOP_BIN;
+    let active_init = legacy_installed ? INSTALLER_LEGACY_INIT : INSTALLER_PADKAP_EVOLUTION_INIT;
+    let active_bin = legacy_installed ? INSTALLER_LEGACY_BIN : INSTALLER_PADKAP_EVOLUTION_BIN;
 
     installer_recover_interrupted_cleanup([
         active_init,
-        INSTALLER_FORKOP_INIT,
+        INSTALLER_PADKAP_EVOLUTION_INIT,
         INSTALLER_LEGACY_INIT,
         INSTALLER_LEGACY_BASE_INIT
     ]);
@@ -1030,7 +1030,7 @@ function installer_cleanup_legacy() {
         { known: true, value: false } :
         installer_backend_status_running_state(active_bin);
     if (!enabled.known || (!running.known && !backend_running.known)) {
-        warn("Unable to determine the Forkop service state before installation.\n");
+        warn("Unable to determine the Padkap Evolution service state before installation.\n");
         return false;
     }
     let was_enabled = enabled.value;
@@ -1066,9 +1066,9 @@ function installer_cleanup_legacy() {
             packages_removed = false;
     }
 
-    if (!installer_remove_package_prefix("luci-i18n-forkop"))
+    if (!installer_remove_package_prefix("luci-i18n-padkap-evolution"))
         packages_removed = false;
-    if (!installer_remove_package("luci-app-forkop"))
+    if (!installer_remove_package("luci-app-padkap-evolution"))
         packages_removed = false;
 
     if (!packages_removed) {
@@ -1089,17 +1089,17 @@ function installer_cleanup_legacy() {
             remove_path(path);
     }
 
-    if (!forkop_installed) {
-        remove_path(INSTALLER_FORKOP_LIB);
-        remove_path(INSTALLER_FORKOP_INIT);
-        remove_path(INSTALLER_FORKOP_BIN);
+    if (!padkap_evolution_installed) {
+        remove_path(INSTALLER_PADKAP_EVOLUTION_LIB);
+        remove_path(INSTALLER_PADKAP_EVOLUTION_INIT);
+        remove_path(INSTALLER_PADKAP_EVOLUTION_BIN);
     }
 
     for (let path in [
-        INSTALLER_FORKOP_LUCI_VIEW,
+        INSTALLER_PADKAP_EVOLUTION_LUCI_VIEW,
         INSTALLER_MENU_JSON,
         INSTALLER_ACL_JSON,
-        INSTALLER_FORKOP_UCI_DEFAULTS,
+        INSTALLER_PADKAP_EVOLUTION_UCI_DEFAULTS,
         INSTALLER_RU_LMO,
         INSTALLER_EN_LMO,
         INSTALLER_RU_LUA,
@@ -1107,9 +1107,9 @@ function installer_cleanup_legacy() {
     ])
         remove_path(path);
 
-    print("FORKOP_WAS_ENABLED=", was_enabled ? "1" : "0", "\n");
-    print("FORKOP_WAS_RUNNING=", was_running ? "1" : "0", "\n");
-    print("FORKOP_LEGACY_DETECTED=", legacy_installed ? "1" : "0", "\n");
+    print("PADKAP_EVOLUTION_WAS_ENABLED=", was_enabled ? "1" : "0", "\n");
+    print("PADKAP_EVOLUTION_WAS_RUNNING=", was_running ? "1" : "0", "\n");
+    print("PADKAP_EVOLUTION_LEGACY_DETECTED=", legacy_installed ? "1" : "0", "\n");
     return true;
 }
 
@@ -1120,8 +1120,8 @@ function installer_finalize_legacy() {
     let legacy_tailscale_dir = INSTALLER_LEGACY_PERSISTENT_DIR + "/tailscale";
     if (path_exists(legacy_tailscale_dir)) {
         let entries = fs.lsdir(legacy_tailscale_dir);
-        let forkop_tailscale_dir = INSTALLER_FORKOP_PERSISTENT_DIR + "/tailscale";
-        if (type(entries) != "array" || !run_args([ "mkdir", "-p", forkop_tailscale_dir ])) {
+        let padkap_evolution_tailscale_dir = INSTALLER_PADKAP_EVOLUTION_PERSISTENT_DIR + "/tailscale";
+        if (type(entries) != "array" || !run_args([ "mkdir", "-p", padkap_evolution_tailscale_dir ])) {
             warn("Failed to prepare legacy Tailscale state migration; the legacy directory was preserved.\n");
             return false;
         }
@@ -1129,11 +1129,11 @@ function installer_finalize_legacy() {
         for (let entry in entries) {
             entry = as_string(entry);
             let source = legacy_tailscale_dir + "/" + entry;
-            let target = forkop_tailscale_dir + "/" + entry;
+            let target = padkap_evolution_tailscale_dir + "/" + entry;
             if (path_exists(target))
                 continue;
 
-            let temporary = forkop_tailscale_dir + "/." + entry + ".forkop-migrate";
+            let temporary = padkap_evolution_tailscale_dir + "/." + entry + ".padkap-evolution-migrate";
             if (!remove_path(temporary) ||
                 !run_args([ "cp", "-a", source, temporary ]) ||
                 !run_args([ "mv", temporary, target ])) {
@@ -1197,26 +1197,26 @@ function installer_finalize_legacy() {
 }
 
 function installer_post_install() {
-    remove_globs(env("FORKOP_INSTALLER_LUCI_CACHE_GLOBS", "/var/luci-indexcache* /tmp/luci-indexcache*"));
+    remove_globs(env("PADKAP_EVOLUTION_INSTALLER_LUCI_CACHE_GLOBS", "/var/luci-indexcache* /tmp/luci-indexcache*"));
     for (let path in [
-        env("FORKOP_INSTALLER_LATEST_VERSION_CACHE", "/tmp/forkop.latest-version.cache"),
-        env("FORKOP_INSTALLER_SYSTEM_INFO_CACHE", "/var/run/forkop/system-info.json"),
-        env("FORKOP_INSTALLER_SERVER_COUNTRY_CACHE", "/var/run/forkop/server-country-cache.json"),
-        env("FORKOP_INSTALLER_SING_BOX_VERSION_CACHE", "/var/run/forkop/ui-state/sing-box-version"),
-        env("FORKOP_INSTALLER_TMP_SYSTEM_INFO_CACHE", "/tmp/forkop/system-info.json")
+        env("PADKAP_EVOLUTION_INSTALLER_LATEST_VERSION_CACHE", "/tmp/padkap-evolution.latest-version.cache"),
+        env("PADKAP_EVOLUTION_INSTALLER_SYSTEM_INFO_CACHE", "/var/run/padkap-evolution/system-info.json"),
+        env("PADKAP_EVOLUTION_INSTALLER_SERVER_COUNTRY_CACHE", "/var/run/padkap-evolution/server-country-cache.json"),
+        env("PADKAP_EVOLUTION_INSTALLER_SING_BOX_VERSION_CACHE", "/var/run/padkap-evolution/ui-state/sing-box-version"),
+        env("PADKAP_EVOLUTION_INSTALLER_TMP_SYSTEM_INFO_CACHE", "/tmp/padkap-evolution/system-info.json")
     ])
         remove_path(path);
 
     if (path_executable(INSTALLER_RPCD_INIT))
         run_args([ INSTALLER_RPCD_INIT, "reload" ]);
 
-    if (env("FORKOP_WAS_ENABLED", "0") == "1" && path_executable(INSTALLER_FORKOP_INIT))
-        run_args([ INSTALLER_FORKOP_INIT, "enable" ]);
+    if (env("PADKAP_EVOLUTION_WAS_ENABLED", "0") == "1" && path_executable(INSTALLER_PADKAP_EVOLUTION_INIT))
+        run_args([ INSTALLER_PADKAP_EVOLUTION_INIT, "enable" ]);
 
-    if (env("FORKOP_WAS_RUNNING", "0") == "1" && path_executable(INSTALLER_FORKOP_INIT)) {
-        if (!run_args([ INSTALLER_FORKOP_INIT, "start" ]) &&
-            !run_args([ INSTALLER_FORKOP_INIT, "restart" ]))
-            warn("Failed to start Forkop after upgrade.\n");
+    if (env("PADKAP_EVOLUTION_WAS_RUNNING", "0") == "1" && path_executable(INSTALLER_PADKAP_EVOLUTION_INIT)) {
+        if (!run_args([ INSTALLER_PADKAP_EVOLUTION_INIT, "start" ]) &&
+            !run_args([ INSTALLER_PADKAP_EVOLUTION_INIT, "restart" ]))
+            warn("Failed to start Padkap Evolution after upgrade.\n");
     }
 
     return true;
@@ -1358,11 +1358,11 @@ function asset_matches(name, kind, ext, version) {
         return false;
 
     if (kind == "backend")
-        return name == "forkop_" + version + "." + ext;
+        return name == "padkap_evolution_" + version + "." + ext;
     if (kind == "app")
-        return name == "luci-app-forkop_" + version + "." + ext;
+        return name == "luci-app-padkap-evolution_" + version + "." + ext;
     if (kind == "i18n")
-        return name == "luci-i18n-forkop-ru_" + version + "." + ext;
+        return name == "luci-i18n-padkap-evolution-ru_" + version + "." + ext;
     return false;
 }
 
@@ -1426,11 +1426,11 @@ EOF
 
 
 install_json_ucode() {
-    FORKOP_INSTALLER_LEGACY_BRAND="$LEGACY_BRAND" \
-    FORKOP_INSTALLER_LEGACY_BACKEND="$LEGACY_BACKEND_PACKAGE" \
-    FORKOP_INSTALLER_LEGACY_CONFIG_ALT="$LEGACY_CONFIG_PACKAGE_ALT" \
-    FORKOP_INSTALLER_DEADLINE_HELPER="$(install_deadline_helper_path)" \
-    FORKOP_INSTALLER_COMMAND_RESULT="$TMP_DIR/installer-command" \
+    PADKAP_EVOLUTION_INSTALLER_LEGACY_BRAND="$LEGACY_BRAND" \
+    PADKAP_EVOLUTION_INSTALLER_LEGACY_BACKEND="$LEGACY_BACKEND_PACKAGE" \
+    PADKAP_EVOLUTION_INSTALLER_LEGACY_CONFIG_ALT="$LEGACY_CONFIG_PACKAGE_ALT" \
+    PADKAP_EVOLUTION_INSTALLER_DEADLINE_HELPER="$(install_deadline_helper_path)" \
+    PADKAP_EVOLUTION_INSTALLER_COMMAND_RESULT="$TMP_DIR/installer-command" \
         ucode "$(install_json_helper_path)" "$@"
 }
 
@@ -1580,7 +1580,7 @@ check_system() {
     major="$(printf '%s' "$release" | sed 's/[^0-9].*$//' | cut -d. -f1)"
 
     if [ -n "$major" ] && [ "$major" -lt 24 ]; then
-        fail "Forkop requires OpenWrt 24.10 or newer"
+        fail "Padkap Evolution requires OpenWrt 24.10 or newer"
     fi
 
     available_space="$(df /overlay 2>/dev/null | awk 'NR==2 {print $4}')"
@@ -1638,7 +1638,7 @@ detect_installer_language() {
     luci_lang="$(get_luci_main_lang)"
 
     INSTALLER_LANG="en"
-    if pkg_is_installed "luci-i18n-forkop-ru"; then
+    if pkg_is_installed "luci-i18n-padkap-evolution-ru"; then
         INSTALLER_LANG="ru"
         return 0
     fi
@@ -1708,32 +1708,32 @@ fetch_github_latest_release_json() {
     printf '%s' "$response"
 }
 
-resolve_forkop_release() {
+resolve_padkap_evolution_release() {
     asset_ext="ipk"
 
     [ "$PKG_IS_APK" -eq 1 ] && asset_ext="apk"
 
-    FORKOP_RELEASE_JSON="$(fetch_github_latest_release_json "$REPO_OWNER" "$REPO_NAME")"
-    FORKOP_RELEASE_TAG="$(printf '%s' "$FORKOP_RELEASE_JSON" | install_json_ucode release-tag 2>/dev/null)"
-    [ -n "$FORKOP_RELEASE_TAG" ] || fail "Failed to detect the Forkop release tag"
+    PADKAP_EVOLUTION_RELEASE_JSON="$(fetch_github_latest_release_json "$REPO_OWNER" "$REPO_NAME")"
+    PADKAP_EVOLUTION_RELEASE_TAG="$(printf '%s' "$PADKAP_EVOLUTION_RELEASE_JSON" | install_json_ucode release-tag 2>/dev/null)"
+    [ -n "$PADKAP_EVOLUTION_RELEASE_TAG" ] || fail "Failed to detect the Padkap Evolution release tag"
 
-    FORKOP_BACKEND_URL="$(printf '%s' "$FORKOP_RELEASE_JSON" | install_json_ucode release-asset-url backend "$asset_ext" 2>/dev/null)"
-    [ -n "$FORKOP_BACKEND_URL" ] || fail "The Forkop release does not contain a forkop .$asset_ext package"
+    PADKAP_EVOLUTION_BACKEND_URL="$(printf '%s' "$PADKAP_EVOLUTION_RELEASE_JSON" | install_json_ucode release-asset-url backend "$asset_ext" 2>/dev/null)"
+    [ -n "$PADKAP_EVOLUTION_BACKEND_URL" ] || fail "The Padkap Evolution release does not contain a padkap-evolution .$asset_ext package"
 
-    FORKOP_APP_URL="$(printf '%s' "$FORKOP_RELEASE_JSON" | install_json_ucode release-asset-url app "$asset_ext" 2>/dev/null)"
-    [ -n "$FORKOP_APP_URL" ] || fail "The Forkop release does not contain a luci-app-forkop .$asset_ext package"
+    PADKAP_EVOLUTION_APP_URL="$(printf '%s' "$PADKAP_EVOLUTION_RELEASE_JSON" | install_json_ucode release-asset-url app "$asset_ext" 2>/dev/null)"
+    [ -n "$PADKAP_EVOLUTION_APP_URL" ] || fail "The Padkap Evolution release does not contain a luci-app-padkap-evolution .$asset_ext package"
 
-    FORKOP_BACKEND_NAME="$(basename "$FORKOP_BACKEND_URL")"
-    FORKOP_APP_NAME="$(basename "$FORKOP_APP_URL")"
-    FORKOP_PACKAGE_VERSION="$(printf '%s\n' "$FORKOP_BACKEND_NAME" | sed 's/^forkop_//;s/\.ipk$//;s/\.apk$//')"
+    PADKAP_EVOLUTION_BACKEND_NAME="$(basename "$PADKAP_EVOLUTION_BACKEND_URL")"
+    PADKAP_EVOLUTION_APP_NAME="$(basename "$PADKAP_EVOLUTION_APP_URL")"
+    PADKAP_EVOLUTION_PACKAGE_VERSION="$(printf '%s\n' "$PADKAP_EVOLUTION_BACKEND_NAME" | sed 's/^padkap_evolution_//;s/\.ipk$//;s/\.apk$//')"
 
-    FORKOP_I18N_URL=""
-    FORKOP_I18N_NAME=""
+    PADKAP_EVOLUTION_I18N_URL=""
+    PADKAP_EVOLUTION_I18N_NAME=""
 
-    if [ "$FORKOP_I18N_REQUESTED" -eq 1 ]; then
-        FORKOP_I18N_URL="$(printf '%s' "$FORKOP_RELEASE_JSON" | install_json_ucode release-asset-url i18n "$asset_ext" 2>/dev/null)"
-        [ -n "$FORKOP_I18N_URL" ] || fail "The Forkop release does not contain a luci-i18n-forkop-ru .$asset_ext package"
-        FORKOP_I18N_NAME="$(basename "$FORKOP_I18N_URL")"
+    if [ "$PADKAP_EVOLUTION_I18N_REQUESTED" -eq 1 ]; then
+        PADKAP_EVOLUTION_I18N_URL="$(printf '%s' "$PADKAP_EVOLUTION_RELEASE_JSON" | install_json_ucode release-asset-url i18n "$asset_ext" 2>/dev/null)"
+        [ -n "$PADKAP_EVOLUTION_I18N_URL" ] || fail "The Padkap Evolution release does not contain a luci-i18n-padkap-evolution-ru .$asset_ext package"
+        PADKAP_EVOLUTION_I18N_NAME="$(basename "$PADKAP_EVOLUTION_I18N_URL")"
     fi
 }
 
@@ -1748,11 +1748,11 @@ select_sing_box_installation() {
     answer=""
     default_choice=1
 
-    if [ "$FORKOP_LEGACY_DETECTED" -eq 1 ] &&
+    if [ "$PADKAP_EVOLUTION_LEGACY_DETECTED" -eq 1 ] &&
         [ -r /etc/init.d/sing-box ] &&
         grep -Fq 'managed sing-box service for binary variants' /etc/init.d/sing-box; then
         SING_BOX_INSTALL_VARIANT="extended-compressed"
-        msg "The legacy binary-managed sing-box variant will be reinstalled for Forkop"
+        msg "The legacy binary-managed sing-box variant will be reinstalled for Padkap Evolution"
         return 0
     fi
 
@@ -1811,9 +1811,9 @@ install_selected_sing_box() {
             ;;
     esac
 
-    [ -x /usr/bin/forkop ] || fail "forkop backend must be installed before sing-box component action"
-    msg "Installing selected sing-box variant through Forkop ucode backend"
-    if ! /usr/bin/forkop component_action sing_box "$action" >"$output_file" 2>&1; then
+    [ -x /usr/bin/padkap-evolution ] || fail "padkap-evolution backend must be installed before sing-box component action"
+    msg "Installing selected sing-box variant through Padkap Evolution ucode backend"
+    if ! /usr/bin/padkap-evolution component_action sing_box "$action" >"$output_file" 2>&1; then
         cat "$output_file" >&2 2>/dev/null || true
         fail "Failed to install selected sing-box variant"
     fi
@@ -1823,14 +1823,14 @@ cleanup_legacy_installation() {
     state_file="$TMP_DIR/install-state.env"
 
     install_json_ucode installer-cleanup-legacy >"$state_file" ||
-        fail "Failed to prepare the system before Forkop package installation"
+        fail "Failed to prepare the system before Padkap Evolution package installation"
 
     # shellcheck disable=SC1090
     . "$state_file"
 }
 
 detect_legacy_installation() {
-    FORKOP_LEGACY_DETECTED=0
+    PADKAP_EVOLUTION_LEGACY_DETECTED=0
     LEGACY_CONFIG_BACKUP=""
 
     if ! pkg_is_installed "$LEGACY_BACKEND_PACKAGE"; then
@@ -1846,7 +1846,7 @@ detect_legacy_installation() {
         [ "$legacy_config_present" -eq 1 ] || return 0
     fi
 
-    FORKOP_LEGACY_DETECTED=1
+    PADKAP_EVOLUTION_LEGACY_DETECTED=1
     for legacy_config_path in \
         "/etc/config/$LEGACY_BACKEND_PACKAGE" \
         "/etc/config/$LEGACY_CONFIG_PACKAGE_ALT"; do
@@ -1866,22 +1866,22 @@ decide_i18n_installation() {
 
     detect_installer_language
 
-    if pkg_is_installed "luci-i18n-forkop-ru"; then
-        FORKOP_I18N_REQUESTED=1
+    if pkg_is_installed "luci-i18n-padkap-evolution-ru"; then
+        PADKAP_EVOLUTION_I18N_REQUESTED=1
         msg "$(installer_text i18n_installed)"
         return 0
     fi
 
-    if [ "$FORKOP_LEGACY_DETECTED" -eq 1 ] &&
+    if [ "$PADKAP_EVOLUTION_LEGACY_DETECTED" -eq 1 ] &&
         pkg_is_installed "luci-i18n-${LEGACY_BACKEND_PACKAGE}-ru"; then
-        FORKOP_I18N_REQUESTED=1
+        PADKAP_EVOLUTION_I18N_REQUESTED=1
         msg "$(installer_text i18n_installed)"
         return 0
     fi
 
     case "$luci_lang" in
         ru|ru_*|ru-*)
-            FORKOP_I18N_REQUESTED=1
+            PADKAP_EVOLUTION_I18N_REQUESTED=1
             INSTALLER_LANG="ru"
             msg "$(installer_text luci_ru)"
             return 0
@@ -1889,7 +1889,7 @@ decide_i18n_installation() {
     esac
 
     if numbered_yes_no_prompt "$(installer_text i18n_prompt)"; then
-        FORKOP_I18N_REQUESTED=1
+        PADKAP_EVOLUTION_I18N_REQUESTED=1
         INSTALLER_LANG="ru"
         return 0
     fi
@@ -1897,42 +1897,42 @@ decide_i18n_installation() {
     warn "$(installer_text i18n_skip)"
 }
 
-download_forkop_packages() {
-    FORKOP_BACKEND_FILE="$TMP_DIR/$FORKOP_BACKEND_NAME"
-    FORKOP_APP_FILE="$TMP_DIR/$FORKOP_APP_NAME"
-    FORKOP_I18N_FILE=""
+download_padkap_evolution_packages() {
+    PADKAP_EVOLUTION_BACKEND_FILE="$TMP_DIR/$PADKAP_EVOLUTION_BACKEND_NAME"
+    PADKAP_EVOLUTION_APP_FILE="$TMP_DIR/$PADKAP_EVOLUTION_APP_NAME"
+    PADKAP_EVOLUTION_I18N_FILE=""
 
-    download_with_retry "$FORKOP_BACKEND_URL" "$FORKOP_BACKEND_FILE" "$FORKOP_BACKEND_NAME" || fail "Failed to download $FORKOP_BACKEND_NAME"
-    download_with_retry "$FORKOP_APP_URL" "$FORKOP_APP_FILE" "$FORKOP_APP_NAME" || fail "Failed to download $FORKOP_APP_NAME"
+    download_with_retry "$PADKAP_EVOLUTION_BACKEND_URL" "$PADKAP_EVOLUTION_BACKEND_FILE" "$PADKAP_EVOLUTION_BACKEND_NAME" || fail "Failed to download $PADKAP_EVOLUTION_BACKEND_NAME"
+    download_with_retry "$PADKAP_EVOLUTION_APP_URL" "$PADKAP_EVOLUTION_APP_FILE" "$PADKAP_EVOLUTION_APP_NAME" || fail "Failed to download $PADKAP_EVOLUTION_APP_NAME"
 
-    if [ -n "$FORKOP_I18N_URL" ]; then
-        FORKOP_I18N_FILE="$TMP_DIR/$FORKOP_I18N_NAME"
-        download_with_retry "$FORKOP_I18N_URL" "$FORKOP_I18N_FILE" "$FORKOP_I18N_NAME" || fail "Failed to download $FORKOP_I18N_NAME"
+    if [ -n "$PADKAP_EVOLUTION_I18N_URL" ]; then
+        PADKAP_EVOLUTION_I18N_FILE="$TMP_DIR/$PADKAP_EVOLUTION_I18N_NAME"
+        download_with_retry "$PADKAP_EVOLUTION_I18N_URL" "$PADKAP_EVOLUTION_I18N_FILE" "$PADKAP_EVOLUTION_I18N_NAME" || fail "Failed to download $PADKAP_EVOLUTION_I18N_NAME"
     fi
 }
 
 install_backend_package() {
-    pkg_install_files "$FORKOP_BACKEND_FILE" || fail "forkop installation failed"
+    pkg_install_files "$PADKAP_EVOLUTION_BACKEND_FILE" || fail "padkap-evolution installation failed"
 }
 
 migrate_legacy_configuration() {
-    [ "$FORKOP_LEGACY_DETECTED" -eq 1 ] || return 0
+    [ "$PADKAP_EVOLUTION_LEGACY_DETECTED" -eq 1 ] || return 0
 
     if [ -n "$LEGACY_CONFIG_BACKUP" ]; then
-        cp "$LEGACY_CONFIG_BACKUP" /etc/config/forkop ||
+        cp "$LEGACY_CONFIG_BACKUP" /etc/config/padkap-evolution ||
             fail "Failed to restore the legacy configuration for migration"
-        chmod 0644 /etc/config/forkop ||
-            fail "Failed to set permissions on the Forkop configuration"
+        chmod 0644 /etc/config/padkap-evolution ||
+            fail "Failed to set permissions on the Padkap Evolution configuration"
 
-        msg "Migrating the legacy configuration to Forkop"
-        if ! FORKOP_CONFIG_NAME="forkop" \
-            FORKOP_LIB="/usr/lib/forkop" \
-            ucode -L /usr/lib/forkop /usr/lib/forkop/config/migration.uc migrate-podkop; then
-            cp "$LEGACY_CONFIG_BACKUP" /etc/config/forkop 2>/dev/null || true
+        msg "Migrating the legacy configuration to Padkap Evolution"
+        if ! PADKAP_EVOLUTION_CONFIG_NAME="padkap-evolution" \
+            PADKAP_EVOLUTION_LIB="/usr/lib/padkap-evolution" \
+            ucode -L /usr/lib/padkap-evolution /usr/lib/padkap-evolution/config/migration.uc migrate-podkop; then
+            cp "$LEGACY_CONFIG_BACKUP" /etc/config/padkap-evolution 2>/dev/null || true
             fail "Legacy configuration migration failed; the original configuration was restored"
         fi
     else
-        warn "The legacy package had no readable configuration; Forkop defaults will be used"
+        warn "The legacy package had no readable configuration; Padkap Evolution defaults will be used"
     fi
 
     install_json_ucode installer-finalize-legacy ||
@@ -1940,17 +1940,17 @@ migrate_legacy_configuration() {
 }
 
 install_ui_packages() {
-    pkg_install_files "$FORKOP_APP_FILE" || fail "luci-app-forkop installation failed"
+    pkg_install_files "$PADKAP_EVOLUTION_APP_FILE" || fail "luci-app-padkap-evolution installation failed"
 
-    if [ -n "$FORKOP_I18N_FILE" ]; then
-        pkg_install_files "$FORKOP_I18N_FILE" || fail "luci-i18n-forkop-ru installation failed"
+    if [ -n "$PADKAP_EVOLUTION_I18N_FILE" ]; then
+        pkg_install_files "$PADKAP_EVOLUTION_I18N_FILE" || fail "luci-i18n-padkap-evolution-ru installation failed"
     fi
 }
 
 post_install() {
-    FORKOP_WAS_ENABLED="$FORKOP_WAS_ENABLED" FORKOP_WAS_RUNNING="$FORKOP_WAS_RUNNING" \
+    PADKAP_EVOLUTION_WAS_ENABLED="$PADKAP_EVOLUTION_WAS_ENABLED" PADKAP_EVOLUTION_WAS_RUNNING="$PADKAP_EVOLUTION_WAS_RUNNING" \
         install_json_ucode installer-post-install ||
-        fail "Failed to complete Forkop post-install actions"
+        fail "Failed to complete Padkap Evolution post-install actions"
 }
 
 main() {
@@ -1973,8 +1973,8 @@ main() {
     pkg_list_update || fail "Failed to update package lists"
     ensure_bootstrap_ucode_runtime
 
-    resolve_forkop_release
-    download_forkop_packages
+    resolve_padkap_evolution_release
+    download_padkap_evolution_packages
 
     cleanup_legacy_installation
     install_backend_package
@@ -1983,9 +1983,9 @@ main() {
     install_selected_sing_box
     post_install
 
-    msg "Forkop $FORKOP_PACKAGE_VERSION has been installed successfully"
-    msg "Source release: ${REPO_OWNER}/${REPO_NAME}@${FORKOP_RELEASE_TAG}"
-    warn "Open LuCI and review your rules before enabling Forkop"
+    msg "Padkap Evolution $PADKAP_EVOLUTION_PACKAGE_VERSION has been installed successfully"
+    msg "Source release: ${REPO_OWNER}/${REPO_NAME}@${PADKAP_EVOLUTION_RELEASE_TAG}"
+    warn "Open LuCI and review your rules before enabling Padkap Evolution"
 }
 
 main "$@"

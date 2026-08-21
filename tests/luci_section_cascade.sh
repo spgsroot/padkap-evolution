@@ -3,7 +3,7 @@ set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-node - "$ROOT_DIR/luci-app-forkop/htdocs/luci-static/resources/view/forkop/section.js" <<'NODE'
+node - "$ROOT_DIR/luci-app-padkap-evolution/htdocs/luci-static/resources/view/padkap-evolution/section.js" <<'NODE'
 const fs = require('fs');
 const assert = require('assert');
 

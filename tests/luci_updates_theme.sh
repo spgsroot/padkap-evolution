@@ -2,8 +2,8 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SOURCE_STYLES="$ROOT_DIR/fe-app-forkop/src/forkop/tabs/updates/styles.ts"
-BUNDLE="$ROOT_DIR/luci-app-forkop/htdocs/luci-static/resources/view/forkop/main.js"
+SOURCE_STYLES="$ROOT_DIR/fe-app-padkap-evolution/src/padkap-evolution/tabs/updates/styles.ts"
+BUNDLE="$ROOT_DIR/luci-app-padkap-evolution/htdocs/luci-static/resources/view/padkap-evolution/main.js"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2

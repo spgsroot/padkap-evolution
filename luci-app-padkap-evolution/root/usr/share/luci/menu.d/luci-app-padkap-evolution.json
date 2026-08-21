@@ -1,0 +1,14 @@
+{
+  "admin/services/padkap-evolution": {
+    "title": "Padkap Evolution",
+    "order": 42,
+    "action": {
+      "type": "view",
+      "path": "padkap-evolution/padkap-evolution"
+    },
+    "depends": {
+			"acl": [ "luci-app-padkap-evolution" ],
+			"uci": { "padkap-evolution": true }
+		}
+  }
+}

@@ -2,8 +2,8 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CACHE_UC="$ROOT_DIR/forkop/files/usr/lib/subscription/cache.uc"
-FORKOP_LIB="$ROOT_DIR/forkop/files/usr/lib"
+CACHE_UC="$ROOT_DIR/padkap-evolution/files/usr/lib/subscription/cache.uc"
+PADKAP_EVOLUTION_LIB="$ROOT_DIR/padkap-evolution/files/usr/lib"
 WORK_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -26,7 +26,7 @@ assert_first_line() {
 }
 
 cache_ucode() {
-  ucode -L "$FORKOP_LIB" "$CACHE_UC" "$@"
+  ucode -L "$PADKAP_EVOLUTION_LIB" "$CACHE_UC" "$@"
 }
 
 cache_ucode write-user-agent-candidates \

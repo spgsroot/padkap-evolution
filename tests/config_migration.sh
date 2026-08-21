@@ -2,12 +2,12 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FORKOP_LIB="$ROOT_DIR/forkop/files/usr/lib"
-RUNTIME_MIGRATION="$FORKOP_LIB/config/migration.uc"
+PADKAP_EVOLUTION_LIB="$ROOT_DIR/padkap-evolution/files/usr/lib"
+RUNTIME_MIGRATION="$PADKAP_EVOLUTION_LIB/config/migration.uc"
 INSTALLER="$ROOT_DIR/install.sh"
 WORK_DIR="$(mktemp -d)"
 MIGRATION="$RUNTIME_MIGRATION"
-MIGRATIONS_DIR="$FORKOP_LIB/config/migrations"
+MIGRATIONS_DIR="$PADKAP_EVOLUTION_LIB/config/migrations"
 
 cleanup() {
   rm -rf "$WORK_DIR"
@@ -19,7 +19,7 @@ fail() {
   exit 1
 }
 
-if grep -n -E 'FORKOP_CONFIG_MIGRATION_EOF|installer_config_migration_path' "$INSTALLER" >/dev/null 2>&1; then
+if grep -n -E 'PADKAP_EVOLUTION_CONFIG_MIGRATION_EOF|installer_config_migration_path' "$INSTALLER" >/dev/null 2>&1; then
   fail "install.sh must not embed configuration migration logic"
 fi
 [ -s "$MIGRATION" ] || fail "runtime configuration migration module is missing"
@@ -39,9 +39,9 @@ grep -Fq '{ id: "http_connection_urls", run: migrate_http_connection_urls }' "$M
 grep -Fq 'release_at_most(ctx, "1.0.1")' "$MIGRATION" ||
   fail "release-specific migrations must use the source release only as a condition"
 grep -Fq 'release_at_most(ctx, "1.0.4")' "$MIGRATION" ||
-  fail "HTTP connection URLs must only migrate from Forkop 1.0.4 and below"
+  fail "HTTP connection URLs must only migrate from Padkap Evolution 1.0.4 and below"
 
-eval "$(ucode -L "$FORKOP_LIB" "$FORKOP_LIB/core/constants.uc" shell-env)"
+eval "$(ucode -L "$PADKAP_EVOLUTION_LIB" "$PADKAP_EVOLUTION_LIB/core/constants.uc" shell-env)"
 export ZAPRET_LEGACY_DEFAULT_NFQWS_OPT ZAPRET_DEFAULT_NFQWS_OPT
 
 node >"$WORK_DIR/fixture.json" <<'NODE'
@@ -159,7 +159,7 @@ const fixture = {
 process.stdout.write(`${JSON.stringify(fixture, null, 2)}\n`);
 NODE
 
-FORKOP_LIB="$FORKOP_LIB" ucode -L "$FORKOP_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/fixture.json" podkop >"$WORK_DIR/output.json"
+PADKAP_EVOLUTION_LIB="$PADKAP_EVOLUTION_LIB" ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/fixture.json" podkop >"$WORK_DIR/output.json"
 
 node - "$WORK_DIR/output.json" <<'NODE'
 const fs = require('fs');
@@ -354,10 +354,10 @@ assert(legacyOutboundCollision.outbound_jsons.length === 2, 'legacy JSON outboun
 assert(JSON.parse(legacyOutboundCollision.outbound_jsons[1]).tag === 'legacy-outbound-collision-json-2-out-1', 'legacy JSON outbound tag avoids existing list tags');
 
 assert(out.removed_caches.includes('/tmp/sing-box/subscriptions/legacy-sub.json'), 'subscription runtime cache removal');
-assert(out.removed_caches.includes('/var/run/forkop/section-cache/legacy-sub.json'), 'section cache removal');
+assert(out.removed_caches.includes('/var/run/padkap-evolution/section-cache/legacy-sub.json'), 'section cache removal');
 NODE
 
-cat >"$WORK_DIR/forkop-1.0.1.json" <<'JSON'
+cat >"$WORK_DIR/padkap-evolution-1.0.1.json" <<'JSON'
 {
   "settings": {
     ".name": "settings",
@@ -376,9 +376,9 @@ cat >"$WORK_DIR/forkop-1.0.1.json" <<'JSON'
 }
 JSON
 
-FORKOP_LIB="$FORKOP_LIB" ucode -L "$FORKOP_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/forkop-1.0.1.json" >"$WORK_DIR/forkop-1.0.2.json"
+PADKAP_EVOLUTION_LIB="$PADKAP_EVOLUTION_LIB" ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/padkap-evolution-1.0.1.json" >"$WORK_DIR/padkap-evolution-1.0.2.json"
 
-node - "$WORK_DIR/forkop-1.0.2.json" <<'NODE'
+node - "$WORK_DIR/padkap-evolution-1.0.2.json" <<'NODE'
 const fs = require('fs');
 const out = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const section = out.config.section[0];
@@ -405,7 +405,7 @@ for (const item of interfaces) {
 }
 NODE
 
-cat >"$WORK_DIR/forkop-1.0.2-disabled.json" <<'JSON'
+cat >"$WORK_DIR/padkap-evolution-1.0.2-disabled.json" <<'JSON'
 {
   "settings": {
     ".name": "settings",
@@ -417,9 +417,9 @@ cat >"$WORK_DIR/forkop-1.0.2-disabled.json" <<'JSON'
 }
 JSON
 
-FORKOP_LIB="$FORKOP_LIB" ucode -L "$FORKOP_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/forkop-1.0.2-disabled.json" >"$WORK_DIR/forkop-1.0.2-disabled-output.json"
+PADKAP_EVOLUTION_LIB="$PADKAP_EVOLUTION_LIB" ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/padkap-evolution-1.0.2-disabled.json" >"$WORK_DIR/padkap-evolution-1.0.2-disabled-output.json"
 
-node - "$WORK_DIR/forkop-1.0.2-disabled-output.json" <<'NODE'
+node - "$WORK_DIR/padkap-evolution-1.0.2-disabled-output.json" <<'NODE'
 const fs = require('fs');
 const out = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 
@@ -435,7 +435,7 @@ assert(out.config.settings.config_version === '1.0.5', '1.0.2 config should adva
 assert(JSON.stringify(out.config.settings.applied_migrations) === JSON.stringify(['interface_sections', 'enable_component_checks', 'http_connection_urls']), 'newer configs should mark skipped migrations');
 NODE
 
-cat >"$WORK_DIR/forkop-1.0.4-http.json" <<'JSON'
+cat >"$WORK_DIR/padkap-evolution-1.0.4-http.json" <<'JSON'
 {
   "settings": {
     ".name": "settings",
@@ -461,9 +461,9 @@ cat >"$WORK_DIR/forkop-1.0.4-http.json" <<'JSON'
 }
 JSON
 
-FORKOP_LIB="$FORKOP_LIB" ucode -L "$FORKOP_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/forkop-1.0.4-http.json" >"$WORK_DIR/forkop-1.0.4-http-output.json"
+PADKAP_EVOLUTION_LIB="$PADKAP_EVOLUTION_LIB" ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/padkap-evolution-1.0.4-http.json" >"$WORK_DIR/padkap-evolution-1.0.4-http-output.json"
 
-node - "$WORK_DIR/forkop-1.0.4-http-output.json" <<'NODE'
+node - "$WORK_DIR/padkap-evolution-1.0.4-http-output.json" <<'NODE'
 const fs = require('fs');
 const out = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const section = out.config.section[0];
@@ -501,7 +501,7 @@ assert(jsonOutbounds[2].type === 'direct' && jsonOutbounds[2].tag === 'http', 'e
 assert(JSON.stringify(out.config.settings.applied_migrations) === JSON.stringify(['interface_sections', 'enable_component_checks', 'http_connection_urls']), 'HTTP URL migration should be recorded');
 NODE
 
-cat >"$WORK_DIR/forkop-1.0.5-http.json" <<'JSON'
+cat >"$WORK_DIR/padkap-evolution-1.0.5-http.json" <<'JSON'
 {
   "settings": {
     ".name": "settings",
@@ -519,9 +519,9 @@ cat >"$WORK_DIR/forkop-1.0.5-http.json" <<'JSON'
 }
 JSON
 
-FORKOP_LIB="$FORKOP_LIB" ucode -L "$FORKOP_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/forkop-1.0.5-http.json" >"$WORK_DIR/forkop-1.0.5-http-output.json"
+PADKAP_EVOLUTION_LIB="$PADKAP_EVOLUTION_LIB" ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate-fixture "$WORK_DIR/padkap-evolution-1.0.5-http.json" >"$WORK_DIR/padkap-evolution-1.0.5-http-output.json"
 
-node - "$WORK_DIR/forkop-1.0.5-http-output.json" <<'NODE'
+node - "$WORK_DIR/padkap-evolution-1.0.5-http-output.json" <<'NODE'
 const fs = require('fs');
 const out = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const section = out.config.section[0];
@@ -533,106 +533,106 @@ if (JSON.stringify(section.selector_proxy_links) !== JSON.stringify(['http://pro
 NODE
 
 cat >"$WORK_DIR/runtime-migrate.state" <<'EOF_UCI'
-forkop.settings=settings
-forkop.settings.routing_excluded_ips=192.0.2.0/24
-forkop.legacy=rule
-forkop.legacy.enabled=1
-forkop.legacy.connection_type=proxy
-forkop.legacy.proxy_config_type=url
-forkop.legacy.proxy_string=vless://one
-forkop.old_direct=section
-forkop.old_direct.enabled=1
-forkop.old_direct.action=direct
-forkop.vpn=section
-forkop.vpn.enabled=1
-forkop.vpn.connection_type=vpn
-forkop.vpn.interface=awg0
-forkop.vpn.domain_resolver_enabled=1
-forkop.vpn.domain_resolver_dns_type=doh
-forkop.vpn.domain_resolver_dns_server=https://dns.example/dns-query
+padkap-evolution.settings=settings
+padkap-evolution.settings.routing_excluded_ips=192.0.2.0/24
+padkap-evolution.legacy=rule
+padkap-evolution.legacy.enabled=1
+padkap-evolution.legacy.connection_type=proxy
+padkap-evolution.legacy.proxy_config_type=url
+padkap-evolution.legacy.proxy_string=vless://one
+padkap-evolution.old_direct=section
+padkap-evolution.old_direct.enabled=1
+padkap-evolution.old_direct.action=direct
+padkap-evolution.vpn=section
+padkap-evolution.vpn.enabled=1
+padkap-evolution.vpn.connection_type=vpn
+padkap-evolution.vpn.interface=awg0
+padkap-evolution.vpn.domain_resolver_enabled=1
+padkap-evolution.vpn.domain_resolver_dns_type=doh
+padkap-evolution.vpn.domain_resolver_dns_server=https://dns.example/dns-query
 EOF_UCI
 mkdir -p "$WORK_DIR/runtime" "$WORK_DIR/persistent-cache"
 : >"$WORK_DIR/runtime-migrate.log"
-FORKOP_UCI_STATE_FILE="$WORK_DIR/runtime-migrate.state" \
-FORKOP_UCI_LOG_FILE="$WORK_DIR/runtime-migrate.log" \
-FORKOP_CONFIG_NAME="forkop" \
+PADKAP_EVOLUTION_UCI_STATE_FILE="$WORK_DIR/runtime-migrate.state" \
+PADKAP_EVOLUTION_UCI_LOG_FILE="$WORK_DIR/runtime-migrate.log" \
+PADKAP_EVOLUTION_CONFIG_NAME="padkap-evolution" \
 TMP_SUBSCRIPTION_FOLDER="$WORK_DIR/tmp-subscriptions" \
-FORKOP_RUNTIME_STATE_DIR="$WORK_DIR/runtime" \
-FORKOP_PERSISTENT_SUBSCRIPTION_CACHE_DIR="$WORK_DIR/persistent-cache" \
-FORKOP_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
-ucode -L "$FORKOP_LIB" "$MIGRATION" migrate-podkop
+PADKAP_EVOLUTION_RUNTIME_STATE_DIR="$WORK_DIR/runtime" \
+PADKAP_EVOLUTION_PERSISTENT_SUBSCRIPTION_CACHE_DIR="$WORK_DIR/persistent-cache" \
+PADKAP_EVOLUTION_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
+ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate-podkop
 
-grep -Fxq 'forkop.legacy=section' "$WORK_DIR/runtime-migrate.state" ||
+grep -Fxq 'padkap-evolution.legacy=section' "$WORK_DIR/runtime-migrate.state" ||
   fail "runtime migration must convert legacy rule type through core.uci"
-grep -Fxq 'forkop.legacy.action=connection' "$WORK_DIR/runtime-migrate.state" ||
+grep -Fxq 'padkap-evolution.legacy.action=connection' "$WORK_DIR/runtime-migrate.state" ||
   fail "runtime migration must write migrated action through core.uci"
-grep -Fxq 'forkop.old_direct.action=bypass' "$WORK_DIR/runtime-migrate.state" ||
+grep -Fxq 'padkap-evolution.old_direct.action=bypass' "$WORK_DIR/runtime-migrate.state" ||
   fail "runtime migration must convert direct action to bypass through core.uci"
-grep -Eq '^forkop\\.cfg[0-9a-f]+=$' "$WORK_DIR/runtime-migrate.state" && fail "anonymous fixture section should include a type"
-grep -Fxq 'forkop.legacy.selector_proxy_links=vless://one' "$WORK_DIR/runtime-migrate.state" ||
+grep -Eq '^padkap-evolution\\.cfg[0-9a-f]+=$' "$WORK_DIR/runtime-migrate.state" && fail "anonymous fixture section should include a type"
+grep -Fxq 'padkap-evolution.legacy.selector_proxy_links=vless://one' "$WORK_DIR/runtime-migrate.state" ||
   fail "runtime migration must keep connection URLs in the parent section"
 if grep -Fq '=connection_url' "$WORK_DIR/runtime-migrate.state"; then
   fail "runtime migration must not create connection_url child sections"
 fi
-grep -Eq '^forkop\.cfg[0-9a-f]+=section_interface$' "$WORK_DIR/runtime-migrate.state" ||
+grep -Eq '^padkap-evolution\.cfg[0-9a-f]+=section_interface$' "$WORK_DIR/runtime-migrate.state" ||
   fail "runtime migration must create an anonymous interface settings section"
-grep -Eq '^forkop\.cfg[0-9a-f]+\.section=vpn$' "$WORK_DIR/runtime-migrate.state" ||
+grep -Eq '^padkap-evolution\.cfg[0-9a-f]+\.section=vpn$' "$WORK_DIR/runtime-migrate.state" ||
   fail "runtime interface settings section must reference its parent"
-grep -Eq '^forkop\.cfg[0-9a-f]+\.name=' "$WORK_DIR/runtime-migrate.state" ||
+grep -Eq '^padkap-evolution\.cfg[0-9a-f]+\.name=' "$WORK_DIR/runtime-migrate.state" ||
   fail "runtime interface settings section must store the interface name"
-if grep -Fq 'forkop.legacy.urltest_enabled=' "$WORK_DIR/runtime-migrate.state"; then
+if grep -Fq 'padkap-evolution.legacy.urltest_enabled=' "$WORK_DIR/runtime-migrate.state"; then
   fail "runtime migration must delete migrated urltest_enabled through core.uci"
 fi
-if grep -Fq 'forkop.settings.routing_excluded_ips=' "$WORK_DIR/runtime-migrate.state"; then
+if grep -Fq 'padkap-evolution.settings.routing_excluded_ips=' "$WORK_DIR/runtime-migrate.state"; then
   fail "runtime migration must delete removed routing_excluded_ips through core.uci"
 fi
-if grep -Fq 'forkop.legacy.proxy_string=' "$WORK_DIR/runtime-migrate.state"; then
+if grep -Fq 'padkap-evolution.legacy.proxy_string=' "$WORK_DIR/runtime-migrate.state"; then
   fail "runtime migration must delete legacy proxy_string through core.uci"
 fi
-grep -Fxq 'commit forkop' "$WORK_DIR/runtime-migrate.log" ||
+grep -Fxq 'commit padkap-evolution' "$WORK_DIR/runtime-migrate.log" ||
   fail "runtime migration must commit through core.uci"
 
 cat >"$WORK_DIR/runtime-version.state" <<'EOF_UCI'
-forkop.settings=settings
-forkop.settings.config_version=1.0.1
-forkop.settings.component_update_check_enabled=0
-forkop.main=section
-forkop.main.enabled=1
-forkop.main.action=connection
-forkop.main.interfaces=awg0
-forkop.main.selector_proxy_links=http://proxy.example:8080
+padkap-evolution.settings=settings
+padkap-evolution.settings.config_version=1.0.1
+padkap-evolution.settings.component_update_check_enabled=0
+padkap-evolution.main=section
+padkap-evolution.main.enabled=1
+padkap-evolution.main.action=connection
+padkap-evolution.main.interfaces=awg0
+padkap-evolution.main.selector_proxy_links=http://proxy.example:8080
 EOF_UCI
 : >"$WORK_DIR/runtime-version.log"
-FORKOP_UCI_STATE_FILE="$WORK_DIR/runtime-version.state" \
-FORKOP_UCI_LOG_FILE="$WORK_DIR/runtime-version.log" \
-FORKOP_CONFIG_NAME="forkop" \
-FORKOP_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
-ucode -L "$FORKOP_LIB" "$MIGRATION" migrate
+PADKAP_EVOLUTION_UCI_STATE_FILE="$WORK_DIR/runtime-version.state" \
+PADKAP_EVOLUTION_UCI_LOG_FILE="$WORK_DIR/runtime-version.log" \
+PADKAP_EVOLUTION_CONFIG_NAME="padkap-evolution" \
+PADKAP_EVOLUTION_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
+ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate
 
-grep -Fxq 'forkop.settings.config_version=1.0.5' "$WORK_DIR/runtime-version.state" ||
+grep -Fxq 'padkap-evolution.settings.config_version=1.0.5' "$WORK_DIR/runtime-version.state" ||
   fail "runtime version migration must advance config_version"
-grep -Fxq 'forkop.settings.component_update_check_enabled=1' "$WORK_DIR/runtime-version.state" ||
+grep -Fxq 'padkap-evolution.settings.component_update_check_enabled=1' "$WORK_DIR/runtime-version.state" ||
   fail "runtime version migration must enable component update checks"
-grep -Fq 'forkop.settings.applied_migrations=interface_sections enable_component_checks http_connection_urls' "$WORK_DIR/runtime-version.state" ||
+grep -Fq 'padkap-evolution.settings.applied_migrations=interface_sections enable_component_checks http_connection_urls' "$WORK_DIR/runtime-version.state" ||
   fail "runtime migration must record stable migration names"
-grep -Eq '^forkop\.main\.outbound_jsons=\{ "type": "http", "tag": "http", "server": "proxy\.example", "server_port": 8080 \}$' "$WORK_DIR/runtime-version.state" ||
+grep -Eq '^padkap-evolution\.main\.outbound_jsons=\{ "type": "http", "tag": "http", "server": "proxy\.example", "server_port": 8080 \}$' "$WORK_DIR/runtime-version.state" ||
   fail "runtime migration must convert native HTTP proxy links to JSON outbounds"
-if grep -Fq 'forkop.main.selector_proxy_links=' "$WORK_DIR/runtime-version.state"; then
+if grep -Fq 'padkap-evolution.main.selector_proxy_links=' "$WORK_DIR/runtime-version.state"; then
   fail "runtime migration must remove converted HTTP connection URLs"
 fi
-grep -Eq '^forkop\.cfg[0-9a-f]+=section_interface$' "$WORK_DIR/runtime-version.state" ||
+grep -Eq '^padkap-evolution\.cfg[0-9a-f]+=section_interface$' "$WORK_DIR/runtime-version.state" ||
   fail "runtime version migration must create interface child settings"
-if grep -Fq 'forkop.main.interfaces=' "$WORK_DIR/runtime-version.state"; then
+if grep -Fq 'padkap-evolution.main.interfaces=' "$WORK_DIR/runtime-version.state"; then
   fail "runtime version migration must remove the parent interface list"
 fi
 
 : >"$WORK_DIR/runtime-version.log"
-FORKOP_UCI_STATE_FILE="$WORK_DIR/runtime-version.state" \
-FORKOP_UCI_LOG_FILE="$WORK_DIR/runtime-version.log" \
-FORKOP_CONFIG_NAME="forkop" \
-FORKOP_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
-ucode -L "$FORKOP_LIB" "$MIGRATION" migrate
-if grep -Fq 'commit forkop' "$WORK_DIR/runtime-version.log"; then
+PADKAP_EVOLUTION_UCI_STATE_FILE="$WORK_DIR/runtime-version.state" \
+PADKAP_EVOLUTION_UCI_LOG_FILE="$WORK_DIR/runtime-version.log" \
+PADKAP_EVOLUTION_CONFIG_NAME="padkap-evolution" \
+PADKAP_EVOLUTION_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
+ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate
+if grep -Fq 'commit padkap-evolution' "$WORK_DIR/runtime-version.log"; then
   fail "completed named migrations must be idempotent"
 fi
 
@@ -660,14 +660,14 @@ cat >"$WORK_DIR/cache-migration/persistent/proxy-subscription-1.json" <<'JSON'
 }
 JSON
 
-FORKOP_UCI_STATE_FILE="$WORK_DIR/runtime-version.state" \
-FORKOP_UCI_LOG_FILE="$WORK_DIR/runtime-version.log" \
-FORKOP_CONFIG_NAME="forkop" \
+PADKAP_EVOLUTION_UCI_STATE_FILE="$WORK_DIR/runtime-version.state" \
+PADKAP_EVOLUTION_UCI_LOG_FILE="$WORK_DIR/runtime-version.log" \
+PADKAP_EVOLUTION_CONFIG_NAME="padkap-evolution" \
 TMP_SUBSCRIPTION_FOLDER="$WORK_DIR/cache-migration/tmp-subscriptions" \
-FORKOP_RUNTIME_STATE_DIR="$WORK_DIR/cache-migration/runtime" \
-FORKOP_PERSISTENT_SUBSCRIPTION_CACHE_DIR="$WORK_DIR/cache-migration/persistent" \
-FORKOP_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
-ucode -L "$FORKOP_LIB" "$MIGRATION" migrate
+PADKAP_EVOLUTION_RUNTIME_STATE_DIR="$WORK_DIR/cache-migration/runtime" \
+PADKAP_EVOLUTION_PERSISTENT_SUBSCRIPTION_CACHE_DIR="$WORK_DIR/cache-migration/persistent" \
+PADKAP_EVOLUTION_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
+ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" migrate
 
 [ "$(sed -n '1p' "$WORK_DIR/cache-migration/runtime/cache-format")" = "8" ] ||
   fail "package migration must advance the runtime cache format"
@@ -687,13 +687,13 @@ NODE
 
 : >"$WORK_DIR/uci-commit.log"
 : >"$WORK_DIR/uci-commit.state"
-FORKOP_UCI_STATE_FILE="$WORK_DIR/uci-commit.state" \
-FORKOP_UCI_LOG_FILE="$WORK_DIR/uci-commit.log" \
-FORKOP_CONFIG_NAME="forkop" \
-FORKOP_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
-ucode -L "$FORKOP_LIB" "$MIGRATION" commit
+PADKAP_EVOLUTION_UCI_STATE_FILE="$WORK_DIR/uci-commit.state" \
+PADKAP_EVOLUTION_UCI_LOG_FILE="$WORK_DIR/uci-commit.log" \
+PADKAP_EVOLUTION_CONFIG_NAME="padkap-evolution" \
+PADKAP_EVOLUTION_INTERNAL_CONFIG_TRIGGER_GUARD="$WORK_DIR/internal-config-change" \
+ucode -L "$PADKAP_EVOLUTION_LIB" "$MIGRATION" commit
 
-grep -Fxq 'commit forkop' "$WORK_DIR/uci-commit.log" ||
-  fail "commit mode must commit forkop through core.uci"
+grep -Fxq 'commit padkap-evolution' "$WORK_DIR/uci-commit.log" ||
+  fail "commit mode must commit padkap-evolution through core.uci"
 
 printf 'installer config migration checks passed\n'

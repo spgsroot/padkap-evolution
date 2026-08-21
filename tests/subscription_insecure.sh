@@ -2,8 +2,8 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CACHE_UC="$ROOT_DIR/forkop/files/usr/lib/subscription/cache.uc"
-FORKOP_LIB="$ROOT_DIR/forkop/files/usr/lib"
+CACHE_UC="$ROOT_DIR/padkap-evolution/files/usr/lib/subscription/cache.uc"
+PADKAP_EVOLUTION_LIB="$ROOT_DIR/padkap-evolution/files/usr/lib"
 WORK_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -45,19 +45,19 @@ chmod +x "$WORK_DIR/bin/curl"
 
 cache_ucode() {
   PATH="$WORK_DIR/bin:$PATH" \
-    FORKOP_UCI_STATE_FILE="$STATE_FILE" \
+    PADKAP_EVOLUTION_UCI_STATE_FILE="$STATE_FILE" \
     TMP_SUBSCRIPTION_FOLDER="$WORK_DIR/subscriptions" \
-    FORKOP_RUNTIME_STATE_DIR="$WORK_DIR/run" \
-    FORKOP_SUBSCRIPTION_UPDATE_STATE_DIR="$WORK_DIR/update-state" \
+    PADKAP_EVOLUTION_RUNTIME_STATE_DIR="$WORK_DIR/run" \
+    PADKAP_EVOLUTION_SUBSCRIPTION_UPDATE_STATE_DIR="$WORK_DIR/update-state" \
     CURL_LOG="$CURL_LOG" \
-    ucode -L "$FORKOP_LIB" "$CACHE_UC" "$@"
+    ucode -L "$PADKAP_EVOLUTION_LIB" "$CACHE_UC" "$@"
 }
 
 cat >"$WORK_DIR/insecure.state" <<'EOF_UCI'
-forkop.proxy=section
-forkop.proxy.enabled=1
-forkop.proxy.subscription_urls=https://example.com/sub
-forkop.proxy.subscription_url_settings={"https://example.com/sub":{"subscription_insecure":"1"}}
+padkap-evolution.proxy=section
+padkap-evolution.proxy.enabled=1
+padkap-evolution.proxy.subscription_urls=https://example.com/sub
+padkap-evolution.proxy.subscription_url_settings={"https://example.com/sub":{"subscription_insecure":"1"}}
 EOF_UCI
 STATE_FILE="$WORK_DIR/insecure.state"
 CURL_LOG="$WORK_DIR/insecure-curl.log"
@@ -67,10 +67,10 @@ cache_ucode update-source proxy 1 'https://example.com/sub' runtime '' ||
 assert_contains "$CURL_LOG" ' -k ' "insecure download must pass -k to curl"
 
 cat >"$WORK_DIR/secure.state" <<'EOF_UCI'
-forkop.proxy=section
-forkop.proxy.enabled=1
-forkop.proxy.subscription_urls=https://example.com/sub
-forkop.proxy.subscription_url_settings={"https://example.com/sub":{"subscription_insecure":"0"}}
+padkap-evolution.proxy=section
+padkap-evolution.proxy.enabled=1
+padkap-evolution.proxy.subscription_urls=https://example.com/sub
+padkap-evolution.proxy.subscription_url_settings={"https://example.com/sub":{"subscription_insecure":"0"}}
 EOF_UCI
 STATE_FILE="$WORK_DIR/secure.state"
 CURL_LOG="$WORK_DIR/secure-curl.log"

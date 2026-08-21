@@ -2,8 +2,8 @@
 set -eo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FORKOP_LIB="$ROOT_DIR/forkop/files/usr/lib"
-UPDATES_UC="$FORKOP_LIB/components/updates.uc"
+PADKAP_EVOLUTION_LIB="$ROOT_DIR/padkap-evolution/files/usr/lib"
+UPDATES_UC="$PADKAP_EVOLUTION_LIB/components/updates.uc"
 WORK_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -59,7 +59,7 @@ UCODE
 
 cat >"$fake_lib/components/action.uc" <<'UCODE'
 #!/usr/bin/env ucode
-let component = ARGV[1] || "forkop";
+let component = ARGV[1] || "padkap-evolution";
 let action = ARGV[2] || "check_update";
 print(sprintf("%J\n", {
     success: true,
@@ -89,11 +89,11 @@ UCODE
 updates_ucode() {
   TEST_COMPONENT_UPDATE_CHECK_ENABLED="${TEST_COMPONENT_UPDATE_CHECK_ENABLED:-1}" \
     TEST_COMPONENT_UPDATE_CHECK_INTERVAL="${TEST_COMPONENT_UPDATE_CHECK_INTERVAL:-1d}" \
-    FORKOP_LIB="$fake_lib" \
-    FORKOP_COMPONENT_UPDATE_CHECK_CACHE_DIR="$cache_dir" \
-    FORKOP_COMPONENT_UPDATE_CHECK_STATE_FILE="$timestamp_file" \
+    PADKAP_EVOLUTION_LIB="$fake_lib" \
+    PADKAP_EVOLUTION_COMPONENT_UPDATE_CHECK_CACHE_DIR="$cache_dir" \
+    PADKAP_EVOLUTION_COMPONENT_UPDATE_CHECK_STATE_FILE="$timestamp_file" \
     UPDATES_JOB_DIR="$job_dir" \
-    ucode -L "$fake_lib" -L "$FORKOP_LIB" "$UPDATES_UC" "$@"
+    ucode -L "$fake_lib" -L "$PADKAP_EVOLUTION_LIB" "$UPDATES_UC" "$@"
 }
 
 updates_ucode component-action-worker "$state_file" "$output_file" zapret check_update
@@ -117,8 +117,8 @@ TEST_COMPONENT_UPDATE_CHECK_ENABLED=0 updates_ucode \
 
 rm -f "$state_file" "$timestamp_file"
 updates_ucode component-updates-if-due
-[ -s "$cache_dir/forkop.json" ] ||
-  fail "automatic checks must cache the Forkop result"
+[ -s "$cache_dir/padkap-evolution.json" ] ||
+  fail "automatic checks must cache the Padkap Evolution result"
 [ -s "$timestamp_file" ] ||
   fail "automatic checks must record their last run"
 
